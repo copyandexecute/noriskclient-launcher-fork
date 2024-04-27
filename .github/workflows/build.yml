@@ -9,22 +9,36 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        platform: [macos-latest, ubuntu-latest, windows-latest]
+        include:
+          - platform: 'macos-latest'
+            args: '--verbose --target universal-apple-darwin'
+          - platform: 'ubuntu-latest'
+            args: '--verbose'
+          - platform: 'windows-latest'
+            args: '--verbose'
 
     runs-on: ${{ matrix.platform }}
     steps:
       - name: Checkout repository and submodules
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           submodules: recursive
 
-      - name: setup node
-        uses: actions/setup-node@v3
+      - name: install pnpm
+        uses: pnpm/action-setup@v2
         with:
-          node-version: 16
+          version: 8.x.x
+
+      - name: setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
 
       - name: install Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
 
       - name: install dependencies (ubuntu only)
         if: matrix.platform == 'ubuntu-latest'
