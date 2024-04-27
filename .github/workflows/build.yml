@@ -1,90 +1,134 @@
-name: Publish
-
+name: Build
 on:
   push:
     tags:
       - "v*"
-  workflow_dispatch:
 
 jobs:
-  publish-tauri:
-    permissions:
-      contents: write
+  build-tauri:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - platform: "macos-latest" # for Arm based macs (M1 and above).
-            args: "--target aarch64-apple-darwin"
-          - platform: "macos-latest" # for Intel based macs.
-            args: "--target x86_64-apple-darwin"
-          - platform: "ubuntu-22.04" # Ubuntu x86_64
-            args: ""
-          - platform: "windows-latest" # Windows x86_64
-            args: "--target x86_64-pc-windows-msvc"
+        platform: [macos-latest, ubuntu-latest, windows-latest]
 
     runs-on: ${{ matrix.platform }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository and submodules
+        uses: actions/checkout@v3
+        with:
+          submodules: recursive
 
       - name: setup node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v3
         with:
-          node-version: lts/*
+          node-version: 16
 
-      - name: Rust cache
-        uses: swatinem/rust-cache@v2
-
-      - name: install Rust stable
+      - name: install Rust
         uses: dtolnay/rust-toolchain@stable
+
+      - name: install dependencies (ubuntu only)
+        if: matrix.platform == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev libappindicator3-dev librsvg2-dev patchelf
+      - name: Cache cargo registry
+        uses: actions/cache@v3
         with:
-          # Those targets are only used on macos runners so it's in an `if` to slightly speed up windows and linux builds.
-          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+      - name: Cache cargo index
+        uses: actions/cache@v3
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: install frontend dependencies
-        run: npm install
-        working-directory: ./desktop
+      - name: Cache tauri build
+        uses: actions/cache@v3
+        with:
+          path: ./src-tauri/target
+          key: ${{ runner.os }}-tauri-build-target-${{ hashFiles('**/Cargo.lock') }}
 
-      # Install OpenCL for Windows
-      - name: Install OpenCL
-        run: vcpkg.exe install opencl
+      - name: install app dependencies and build it
+        run: yarn && yarn build
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
+          TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
+
+      - run: |
+          ls -R ./src-tauri/target/release/bundle
+          mv ./src-tauri/target/release/bundle/appimage/no-risk-client**.AppImage ./src-tauri/target/release/bundle/appimage/NoRiskClient-Linux.AppImage
+          mv ./src-tauri/target/release/bundle/appimage/no-risk-client**.AppImage.tar.gz ./src-tauri/target/release/bundle/appimage/NoRiskClient-Linux.AppImage.tar.gz
+          mv ./src-tauri/target/release/bundle/appimage/no-risk-client**.AppImage.tar.gz.sig ./src-tauri/target/release/bundle/appimage/NoRiskClient-Linux.AppImage.tar.gz.sig
+          mv ./src-tauri/target/release/bundle/deb/no-risk-client**.deb ./src-tauri/target/release/bundle/appimage/NoRiskClient-Linux.deb
+        if: matrix.platform == 'ubuntu-latest'
+      - uses: actions/upload-artifact@v2
+        if: matrix.platform == 'ubuntu-latest'
+        with:
+          name: noriskclient-linux
+          path: ./src-tauri/target/release/bundle/appimage/NoRiskClient-Linux.*
+
+      - run: |
+          cd ./src-tauri/target/release/bundle
+          Get-ChildItem -Recurse
+          mv nsis/NoRiskClient**.exe nsis/NoRiskClient-Windows-setup.exe
+          mv nsis/NoRiskClient**.nsis.zip nsis/NoRiskClient-Windows-setup.nsis.zip
+          mv nsis/NoRiskClient**.nsis.zip.sig nsis/NoRiskClient-Windows-setup.nsis.zip.sig
         if: matrix.platform == 'windows-latest'
-
-      # Install tauri cli with patch on macOS aarch64
-      - name: Install custom tauri cli
-        run: cargo install tauri-cli --git https://github.com/thewh1teagle/tauri --branch temp-macos-signing-without-runtime-config --debug
-        if: matrix.args == '--target aarch64-apple-darwin'
-
-      - name: Build for aarch64
-        uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
+      - uses: actions/upload-artifact@v2
+        if: matrix.platform == 'windows-latest'
         with:
-          tagName: v__VERSION__ # the action automatically replaces __VERSION__ with the app version.
-          releaseName: "v__VERSION__"
-          releaseBody: "See the assets to download this version and install."
-          releaseDraft: true
-          prerelease: false
-          args: ${{ matrix.args }}
-          projectPath: './desktop'
-          tauriScript: cargo tauri
-        if: matrix.args == '--target aarch64-apple-darwin'
+          name: noriskclient-windows
+          path: ./src-tauri/target/release/bundle/nsis/NoRiskClient-Windows-setup.*
 
-
-      - name: Build
-        uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
+      - run: |
+          ls -R ./src-tauri/target/release/bundle
+          mv ./src-tauri/target/release/bundle/dmg/NoRiskClient**.dmg ./src-tauri/target/release/bundle/macos/NoRiskClient-MacOS.dmg
+          mv ./src-tauri/target/release/bundle/macos/NoRiskClient.app.tar.gz ./src-tauri/target/release/bundle/macos/NoRiskClient-MacOS.app.tar.gz
+          mv ./src-tauri/target/release/bundle/macos/NoRiskClient.app.tar.gz.sig ./src-tauri/target/release/bundle/macos/NoRiskClient-MacOS.app.tar.gz.sig
+        if: matrix.platform == 'macos-latest'
+      - uses: actions/upload-artifact@v2
+        if: matrix.platform == 'macos-latest'
         with:
-          tagName: v__VERSION__ # the action automatically replaces __VERSION__ with the app version.
-          releaseName: "v__VERSION__"
-          releaseBody: "See the assets to download this version and install."
-          releaseDraft: true
+          name: noriskclient-macos
+          path: ./src-tauri/target/release/bundle/macos/NoRiskClient-MacOS.*
+
+  create-release:
+    needs: build-tauri
+    permissions: write-all
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v2
+
+      - name: Download Artifact Outputs - macOS
+        uses: actions/download-artifact@v2
+        with:
+          name: noriskclient-macos
+          path: noriskclient-macos
+
+      - name: Download Artifact Outputs - Ubuntu
+        uses: actions/download-artifact@v2
+        with:
+          name: noriskclient-linux
+          path: noriskclient-linux
+
+      - name: Download Artifact Outputs - Windows
+        uses: actions/download-artifact@v2
+        with:
+          name: noriskclient-windows
+          path: noriskclient-windows
+
+      - name: Create GitHub Release
+        id: create_release
+        uses: marvinpinto/action-automatic-releases@latest
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
           prerelease: false
-          args: ${{ matrix.args }}
-          projectPath: './'
-        if: matrix.args != '--target aarch64-apple-darwin'
+          files: |
+            noriskclient-macos/**
+            noriskclient-linux/**
+            noriskclient-windows/**
