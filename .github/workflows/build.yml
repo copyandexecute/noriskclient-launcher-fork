@@ -56,7 +56,7 @@ jobs:
           key: ${{ runner.os }}-tauri-build-target-${{ hashFiles('**/Cargo.lock') }}
 
       - name: install app dependencies and build it
-        run: npm && npm build
+        run: npm install
 
       - uses: tauri-apps/tauri-action@v0
         env:
