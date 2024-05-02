@@ -11,7 +11,7 @@ jobs:
       matrix:
         include:
           - platform: 'macos-latest'
-            args: '--verbose --target x86_64-apple-darwin'
+            args: '--verbose --target universal-apple-darwin'
           - platform: 'ubuntu-latest'
             args: '--verbose'
           - platform: 'windows-latest'
