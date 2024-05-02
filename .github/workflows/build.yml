@@ -96,15 +96,15 @@ jobs:
 
       - run: |
           ls -R ./src-tauri/target/universal-apple-darwin/release/bundle
-          mv ./src-tauri/target/universal-apple-darwin/release/bundle/dmg/NoRiskClient**.dmg ./src-tauri/target/release/bundle/macos/NoRiskClient-MacOS.dmg
-          mv ./src-tauri/target/universal-apple-darwin/release/bundle/macos/NoRiskClient.app.tar.gz ./src-tauri/target/release/bundle/macos/NoRiskClient-MacOS.app.tar.gz
-          mv ./src-tauri/target/universal-apple-darwin/release/bundle/macos/NoRiskClient.app.tar.gz.sig ./src-tauri/target/release/bundle/macos/NoRiskClient-MacOS.app.tar.gz.sig
+          mv ./src-tauri/target/universal-apple-darwin/release/bundle/dmg/NoRiskClient**.dmg ./src-tauri/target/universal-apple-darwin/release/bundle/macos/NoRiskClient-MacOS.dmg
+          mv ./src-tauri/target/universal-apple-darwin/release/bundle/macos/NoRiskClient.app.tar.gz ./src-tauri/target/universal-apple-darwin/release/bundle/macos/NoRiskClient-MacOS.app.tar.gz
+          mv ./src-tauri/target/universal-apple-darwin/release/bundle/macos/NoRiskClient.app.tar.gz.sig ./src-tauri/target/universal-apple-darwin/release/bundle/macos/NoRiskClient-MacOS.app.tar.gz.sig
         if: matrix.platform == 'macos-latest'
       - uses: actions/upload-artifact@v2
         if: matrix.platform == 'macos-latest'
         with:
           name: noriskclient-macos
-          path: ./src-tauri/target/release/bundle/macos/NoRiskClient-MacOS.*
+          path: ./src-tauri/target/universal-apple-darwin/release/bundle/macos/NoRiskClient-MacOS.*
 
   create-release:
     needs: build-tauri
