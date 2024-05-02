@@ -66,79 +66,8 @@ jobs:
           TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
         with:
           args: ${{ matrix.args }}
-
-      - run: |
-          ls -R ./src-tauri/target/release/bundle
-          mv ./src-tauri/target/release/bundle/appimage/no-risk-client**.AppImage ./src-tauri/target/release/bundle/appimage/NoRiskClient-Linux.AppImage
-          mv ./src-tauri/target/release/bundle/appimage/no-risk-client**.AppImage.tar.gz ./src-tauri/target/release/bundle/appimage/NoRiskClient-Linux.AppImage.tar.gz
-          mv ./src-tauri/target/release/bundle/appimage/no-risk-client**.AppImage.tar.gz.sig ./src-tauri/target/release/bundle/appimage/NoRiskClient-Linux.AppImage.tar.gz.sig
-          mv ./src-tauri/target/release/bundle/deb/no-risk-client**.deb ./src-tauri/target/release/bundle/appimage/NoRiskClient-Linux.deb
-        if: matrix.platform == 'ubuntu-latest'
-      - uses: actions/upload-artifact@v2
-        if: matrix.platform == 'ubuntu-latest'
-        with:
-          name: noriskclient-linux
-          path: ./src-tauri/target/release/bundle/appimage/NoRiskClient-Linux.*
-
-      - run: |
-          cd ./src-tauri/target/release/bundle
-          Get-ChildItem -Recurse
-          mv nsis/NoRiskClient**.exe nsis/NoRiskClient-Windows-setup.exe
-          mv nsis/NoRiskClient**.nsis.zip nsis/NoRiskClient-Windows-setup.nsis.zip
-          mv nsis/NoRiskClient**.nsis.zip.sig nsis/NoRiskClient-Windows-setup.nsis.zip.sig
-        if: matrix.platform == 'windows-latest'
-      - uses: actions/upload-artifact@v2
-        if: matrix.platform == 'windows-latest'
-        with:
-          name: noriskclient-windows
-          path: ./src-tauri/target/release/bundle/nsis/NoRiskClient-Windows-setup.*
-
-      - run: |
-          ls -R ./src-tauri/target/release/bundle
-          mv ./src-tauri/target/release/bundle/dmg/NoRiskClient**.dmg ./src-tauri/target/release/bundle/macos/NoRiskClient-MacOS.dmg
-          mv ./src-tauri/target/release/bundle/macos/NoRiskClient.app.tar.gz ./src-tauri/target/release/bundle/macos/NoRiskClient-MacOS.app.tar.gz
-          mv ./src-tauri/target/release/bundle/macos/NoRiskClient.app.tar.gz.sig ./src-tauri/target/release/bundle/macos/NoRiskClient-MacOS.app.tar.gz.sig
-        if: matrix.platform == 'macos-latest'
-      - uses: actions/upload-artifact@v2
-        if: matrix.platform == 'macos-latest'
-        with:
-          name: noriskclient-macos
-          path: ./src-tauri/target/release/bundle/macos/NoRiskClient-MacOS.*
-
-  create-release:
-    needs: build-tauri
-    permissions: write-all
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v2
-
-      - name: Download Artifact Outputs - macOS
-        uses: actions/download-artifact@v2
-        with:
-          name: noriskclient-macos
-          path: noriskclient-macos
-
-      - name: Download Artifact Outputs - Ubuntu
-        uses: actions/download-artifact@v2
-        with:
-          name: noriskclient-linux
-          path: noriskclient-linux
-
-      - name: Download Artifact Outputs - Windows
-        uses: actions/download-artifact@v2
-        with:
-          name: noriskclient-windows
-          path: noriskclient-windows
-
-      - name: Create GitHub Release
-        id: create_release
-        uses: marvinpinto/action-automatic-releases@latest
-        with:
-          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          tagName: app-v__VERSION__ # the action automatically replaces \_\_VERSION\_\_ with the app version.
+          releaseName: 'App v__VERSION__'
+          releaseBody: 'See the assets to download this version and install.'
+          releaseDraft: true
           prerelease: false
-          files: |
-            noriskclient-macos/**
-            noriskclient-linux/**
-            noriskclient-windows/**
