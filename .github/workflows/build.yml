@@ -9,13 +9,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - platform: 'macos-latest'
-            args: '--verbose --target universal-apple-darwin'
-          - platform: 'ubuntu-latest'
-            args: '--verbose'
-          - platform: 'windows-latest'
-            args: '--verbose'
+        platform: [macos-latest, ubuntu-latest, windows-latest]
 
     runs-on: ${{ matrix.platform }}
     steps:
@@ -31,7 +25,6 @@ jobs:
 
       - name: install Rust
         uses: dtolnay/rust-toolchain@stable
-
 
       - name: install dependencies (ubuntu only)
         if: matrix.platform == 'ubuntu-latest'
@@ -56,7 +49,7 @@ jobs:
           key: ${{ runner.os }}-tauri-build-target-${{ hashFiles('**/Cargo.lock') }}
 
       - name: install app dependencies and build it
-        run: npm install
+        run: yarn && yarn build
 
       - uses: tauri-apps/tauri-action@v0
         env:
