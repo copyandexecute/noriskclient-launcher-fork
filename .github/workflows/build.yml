@@ -24,7 +24,7 @@ jobs:
           node-version: 16
 
       - name: install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.76
 
       - name: install dependencies (ubuntu only)
         if: matrix.platform == 'ubuntu-latest'
