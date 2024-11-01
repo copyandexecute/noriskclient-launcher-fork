@@ -8,7 +8,7 @@
   },
   "package": {
     "productName": "NoRiskClient",
-    "version": "0.4.6"
+    "version": "0.5.10"
   },
   "tauri": {
     "allowlist": {
@@ -23,6 +23,9 @@
           "$APPDATA/",
           "$APPDATA"
         ]
+      },
+      "window": {
+        "show": true
       }
     },
     "bundle": {
@@ -70,13 +73,34 @@
             "main"
           ],
           "enableTauriAPI": true
+        },
+        {
+          "domain": "api.norisk.gg",
+          "windows": [
+            "external"
+          ],
+          "enableTauriAPI": true
+        },
+        {
+          "domain": "api-staging.norisk.gg",
+          "windows": [
+            "external"
+          ],
+          "enableTauriAPI": true
+        },
+        {
+          "domain": "sessionserver.mojang.com",
+          "windows": [
+            "external"
+          ],
+          "enableTauriAPI": true
         }
       ]
     },
     "updater": {
       "active": true,
       "endpoints": [
-        "https://api.norisk.gg/launcherapi/v1/launcher/releases/{{target}}/{{current_version}}"
+        "https://api.norisk.gg/api/v1/launcher/releases/{{target}}/{{current_version}}"
       ],
       "dialog": false,
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDk5QkZBNTBGNjhDQTBGOEYKUldTUEQ4cG9ENlcvbVpVTVdnVkNNSGlXWXVXRklqcGFxNnBuRW1LM3VDTXpKcXU2MmdCNVc5S2IK"
@@ -89,7 +113,8 @@
         "resizable": false,
         "fullscreen": false,
         "decorations": false,
-        "center": true
+        "center": true,
+        "visible": false
       }
     ]
   }

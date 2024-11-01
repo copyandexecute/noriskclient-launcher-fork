@@ -1,9 +1,11 @@
 
 <script>
   import { open } from '@tauri-apps/api/dialog';
+  import { addNotification } from '../../../stores/notificationStore.js';
 
   export let title;
-  export let value; // value of the text field
+  export let value;
+  export let id = "";
 
   // Try to get user-desired folder path via system dialog
   async function selectFolderPath() {
@@ -15,8 +17,8 @@
       if (result) {
         value = result
       }
-    } catch (e) {
-      alert("Failed to select folder using dialog")
+    } catch (error) {
+      addNotification("Failed to select folder using dialog: " + error);
     }
   }
 </script>
@@ -25,12 +27,16 @@
   <h1>{title}</h1>
   <div class="input-button-wrapper">
     <!-- svelte-ignore a11y-autofocus -->
-    <input placeholder="Internal" autofocus={false} bind:value={value} type="text" class="nes-input" disabled>
-    <button on:click={selectFolderPath} aria-label="Select Folder">📂</button>
+    <input id={id} placeholder="Detect Automatically" autofocus={false} bind:value={value} type="text" class="nes-input" disabled>
+    <button on:click={selectFolderPath} aria-label="Select Folder" title="Select Folder">📂</button>
   </div>
 </div>
 
 <style>
+    .input-container {
+      width: 100%;
+    }
+
     .input-button-wrapper {
         width: 100%;
         display: flex;
@@ -40,6 +46,7 @@
 
     input {
       margin-right: 5px;
+      border-radius: 5px;
     }
 
     button {
@@ -72,13 +79,21 @@
         font-size: 10px;
         padding: 6px 8px;
         border: 1px solid #212121;
+        color: var(--font-color-disabled);
+        text-shadow: 1.25px 1.25px var(--font-color-text-shadow);
         background-color: var(--background-contrast-color);
         width: 100%;
         outline: none;
         transition: background-color 0.3s ease-in-out;
     }
 
+    .nes-input::target-text {
+      color: var(--font-color);
+      opacity: 0.65;
+    }
+
     .nes-input::placeholder {
       color: var(--font-color);
+      opacity: 0.65;
     }
 </style>

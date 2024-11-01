@@ -1,35 +1,12 @@
 <script>
   import AccountListItem from "./AccountListItem.svelte";
-  import { invoke } from "@tauri-apps/api/tauri";
+  import { defaultUser, users } from "../../stores/credentialsStore.js";
+  import { startMicrosoftAuth } from "../../utils/microsoftUtils.js";
 
   export let showModal;
-  export let options;
 
   let dialog; // HTMLDialogElement
   $: if (dialog && showModal) dialog.showModal();
-
-  const handleAddAccount = async () => {
-    await invoke("login_norisk_microsoft", { options }).then((loginData) => {
-      console.debug("Received Login Data...", loginData);
-
-      options.currentUuid = loginData.uuid;
-
-      // Index des vorhandenen Objekts mit derselben UUID suchen
-      let existingIndex = options.accounts.findIndex(obj => obj.uuid === loginData.uuid);
-      if (existingIndex !== -1) {
-        console.debug("Replace Account");
-        options.accounts[existingIndex] = loginData;
-      } else {
-        console.debug("Add New Account");
-        options.accounts.push(loginData);
-      }
-
-      options.store();
-    }).catch(e => {
-      console.error("microsoft authentication error", e);
-      alert(e);
-    });
-  };
 </script>
 
 <!-- svelte-ignore a11y-click-events-have-key-events -->
@@ -45,12 +22,14 @@
         <h1 class="nes-font red-text-clickable" on:click={() => dialog.close()}>X</h1>
       </div>
       <hr>
-      {#each options.accounts as account}
-        <AccountListItem bind:dialog isActive={options.currentUuid === account.uuid} bind:options={options} account={account} />
-      {/each}
+      {#if $defaultUser}
+        {#each $users as account}
+          <AccountListItem bind:dialog isActive={$defaultUser.id === account.id} account={account} />
+        {/each}
+      {/if}
     </div>
     <!-- svelte-ignore a11y-autofocus -->
-    <div class="add-account-button" on:click={handleAddAccount}>ADD ACCOUNT</div>
+    <div class="add-account-button primary-text" on:click={startMicrosoftAuth}>ADD ACCOUNT</div>
   </div>
 </dialog>
 
@@ -79,6 +58,7 @@
         position: fixed; /* Fixierte Positionierung */
         top: 50%; /* 50% von oben */
         left: 50%; /* 50% von links */
+        overflow: hidden;
         transform: translate(-50%, -50%); /* Verschiebung um die Hälfte der eigenen Breite und Höhe */
         background-color: var(--background-color);
     }
@@ -117,8 +97,11 @@
         font-family: 'Press Start 2P', serif;
         font-size: 18px;
         padding: 1em;
-        color: var(--primary-color);
-        text-shadow: 2px 2px var(--primary-color-text-shadow);
+        transition-duration: 200ms;
         cursor: pointer;
+    }
+
+    .add-account-button:hover {
+        transform: scale(1.15);
     }
 </style>

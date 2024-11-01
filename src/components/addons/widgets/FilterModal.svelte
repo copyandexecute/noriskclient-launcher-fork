@@ -53,9 +53,6 @@
 
   $: if (dialog && showModal) dialog.showModal();
 
-  function preventSelection(event) {
-    event.preventDefault();
-  }
 </script>
 
 <!-- svelte-ignore a11y-click-events-have-key-events -->
@@ -66,7 +63,7 @@
   <div on:click|stopPropagation class="divider">
     <div>
       <div class="header-wrapper">
-        <h1 class="nes-font" on:selectstart={preventSelection} on:mousedown={preventSelection}>FILTERS</h1>
+        <h1 class="nes-font">FILTERS</h1>
         <h1 class="nes-font red-text-clickable close-button" on:click={hideModal}>X</h1>
       </div>
       <hr>
@@ -74,7 +71,7 @@
         {#if !reload}
         <VirtualList height="27.5em" items={list} let:item>
             {#if item?.id == undefined || item?.id == null}
-              <p class="filter-type" class:first={list.indexOf(item) == 0}>{item}</p>
+              <p class="filter-type primary-text" class:first={list.indexOf(item) == 0}>{item}</p>
             {:else}
               <ConfigRadioButton bind:value={activeFilters[item.id].enabled} text={item.name} reversed={true} spaced={true} on:toggle={() => dispatch('search')} />
               <div style="height: 7.5px;"></div>
@@ -87,7 +84,7 @@
     </div>
     <!-- svelte-ignore a11y-autofocus -->
     <div class="clear-data-button-wrapper">
-      <p class="red-text" on:selectstart={preventSelection} on:mousedown={preventSelection} on:click={resetFilters}>RESET FILTERS</p>
+      <p class="red-text" on:click={resetFilters}>RESET FILTERS</p>
     </div>
   </div>
 </dialog>
@@ -107,6 +104,7 @@
     .close-button:hover {
         transition: transform 0.3s;
         transform: scale(1.2);
+        cursor: pointer;
     }
 
     .settings-wrapper {
@@ -114,6 +112,7 @@
         flex-direction: column;
         margin-top: 1.5em;
         gap: 1em;
+        user-select: none;
     }
 
     .filter-type {
@@ -121,7 +120,6 @@
       font-size: 20px;
       margin-top: 30px;
       margin-bottom: 15px;
-      color: var(--primary-color);
       user-select: none;
       cursor: default;
     }
@@ -188,6 +186,7 @@
         font-size: 18px;
         padding: 1em;
         text-shadow: 2px 2px #6e0000;
+        user-select: none;
     }
 
     .clear-data-button-wrapper p {

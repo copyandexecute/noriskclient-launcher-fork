@@ -1,10 +1,18 @@
 use std::fmt::Display;
+use std::process::Command;
 use anyhow::{bail, Result};
+use log::debug;
 use once_cell::sync::Lazy;
 use serde::Deserialize;
 use sysinfo::{RefreshKind, System, SystemExt};
 
 /// Get the total memory of the system in bytes
+pub fn total_memory() -> i64 {
+    let sys = System::new_with_specifics(RefreshKind::new().with_memory());
+
+    sys.total_memory() as i64
+}
+
 pub fn percentage_of_total_memory(memory_percentage: i32) -> i64 {
     let sys = System::new_with_specifics(RefreshKind::new().with_memory());
 
@@ -21,17 +29,35 @@ pub const OS: OperatingSystem = if cfg!(target_os = "windows") {
     OperatingSystem::UNKNOWN
 };
 
-pub const ARCHITECTURE: Architecture = if cfg!(target_arch = "x86") {
-    Architecture::X86 // 32-bit
-} else if cfg!(target_arch = "x86_64") {
-    Architecture::X64 // 64-bit
-} else if cfg!(target_arch = "arm") {
-    Architecture::ARM // ARM
-} else if cfg!(target_arch = "aarch64") {
-    Architecture::AARCH64 // AARCH64
-} else {
-    Architecture::UNKNOWN // Unsupported architecture
-};
+pub fn is_rosetta() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        if let Ok(output) = Command::new("sysctl")
+            .arg("sysctl.proc_translated")
+            .output()
+        {
+            debug!("Rosetta Output: {:?}", String::from_utf8_lossy(&output.stdout));
+            return String::from_utf8_lossy(&output.stdout).contains("1");
+        }
+    }
+    false
+}
+
+pub fn get_architecture() -> Architecture {
+    match () {
+        _ if cfg!(target_arch = "x86") => Architecture::X86,
+        _ if cfg!(target_arch = "x86_64") => {
+            if is_rosetta() {
+                Architecture::AARCH64
+            } else {
+                Architecture::X64
+            }
+        }
+        _ if cfg!(target_arch = "arm") => Architecture::ARM,
+        _ if cfg!(target_arch = "aarch64") => Architecture::AARCH64,
+        _ => Architecture::UNKNOWN,
+    }
+}
 
 pub const OS_VERSION: Lazy<String> = Lazy::new(|| {
     os_info::get().version().to_string()
@@ -46,7 +72,7 @@ pub enum OperatingSystem {
     #[serde(rename = "osx")]
     OSX,
     #[serde(rename = "unknown")]
-    UNKNOWN
+    UNKNOWN,
 }
 
 #[derive(Deserialize, Clone, PartialEq, Eq, Hash, Debug)]
@@ -60,7 +86,7 @@ pub enum Architecture {
     #[serde(rename = "aarch64")]
     AARCH64,
     #[serde(rename = "unknown")]
-    UNKNOWN
+    UNKNOWN,
 }
 
 impl OperatingSystem {
@@ -89,7 +115,6 @@ impl OperatingSystem {
             _ => bail!("Invalid OS")
         })
     }
-
 }
 
 impl Display for OperatingSystem {

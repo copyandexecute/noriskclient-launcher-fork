@@ -2,10 +2,13 @@
   import { invoke } from "@tauri-apps/api/tauri";
   import { fade } from "svelte/transition";
   import { createEventDispatcher } from "svelte";
+  import { defaultUser } from "../../stores/credentialsStore.js";
+  import { launcherOptions } from "../../stores/optionsStore.js";
+  import { getNoRiskToken } from "../../utils/noriskUtils.js";
+  import { addNotification } from "../../stores/notificationStore.js";
 
   const dispatch = createEventDispatcher();
 
-  export let options;
   export let capes = [];
   let visibleCapes = [];
 
@@ -46,28 +49,27 @@
   let responseData = "";
 
   async function getNameByUUID(uuid) {
-    console.debug("UUID", uuid);
     await invoke("mc_name_by_uuid", {
       uuid: uuid,
     }).then((user) => {
       responseData = user ?? "Unknown";
-    }).catch(e => {
+    }).catch(error => {
       responseData = "Unknown";
+      addNotification("Failed to get name by UUID: " + error);
     });
   }
 
   async function handleEquipCape(hash) {
-    console.debug("CLICKED", hash);
-    let account = options.accounts.find(obj => obj.uuid === options.currentUuid);
-    if (account !== null) {
+    if ($defaultUser) {
       await invoke("equip_cape", {
-        noriskToken: options.experimentalMode ? account.experimentalToken : account.noriskToken,
-        uuid: options.currentUuid,
+        noriskToken: getNoRiskToken(),
+        uuid: $defaultUser.id,
         hash: hash,
       }).then(() => {
+        addNotification("Cape equipped!", "INFO");
         dispatch("fetchNoRiskUser");
       }).catch((error) => {
-        console.error(error);
+        addNotification("Failed to equip cape: " + error);
       });
     }
   }
@@ -99,29 +101,27 @@
           <h1>{getIndex(cape._id) + 1}.</h1>
           <div
             class="crop"
-            on:mouseenter={() =>{
-                            cape.hovered = true
-                            return getNameByUUID(cape.firstSeen); }}
+            on:mouseenter={() => { cape.hovered = true; return getNameByUUID(cape.firstSeen); }}
             on:mouseleave={() => cape.hovered = false}
           >
-            {#if options.experimentalMode}
+            {#if $launcherOptions.experimentalMode}
               <!-- svelte-ignore a11y-img-redundant-alt -->
-              <img src={`https://dl-staging.norisk.gg/capes/prod/${cape._id}.png`} alt="Cape Image">
+              <img src={`https://dl-staging.norisk.gg/capes/prod/${cape._id}.png`} alt="Cape Image" class:custom={cape._id.includes("NO_COPY")}>
             {:else}
               <!-- svelte-ignore a11y-img-redundant-alt -->
-              <img src={`https://dl.norisk.gg/capes/prod/${cape._id}.png`} alt="Cape Image">
+              <img src={`https://dl.norisk.gg/capes/prod/${cape._id}.png`} alt="Cape Image" class:custom={cape._id.includes("NO_COPY")}>
             {/if}
-            <!-- svelte-ignore a11y-click-events-have-key-events -->
-            <div on:click={handleEquipCape(cape._id)} class="equip-text">
-              EQUIP
-            </div>
+            {#if !cape._id.includes("NO_COPY") || cape.firstSeen === $defaultUser.id}
+              <!-- svelte-ignore a11y-click-events-have-key-events -->
+              <div on:click={() => handleEquipCape(cape._id)} class="equip-text">EQUIP</div>
+            {/if}
           </div>
           {#if cape.hovered}
             <div in:fade={{ duration: 300 }} out:fade={{ duration: 300 }} class="info-text">
               by {responseData}
             </div>
             <div in:fade={{ duration: 300 }} out:fade={{ duration: 300 }} class="info-text-bottom">
-              {cape.uses} Uses
+              Used by {cape.uses} players
             </div>
           {/if}
         </div>
@@ -162,6 +162,7 @@
         align-items: center;
         justify-content: center;
         width: 100vw;
+        height: 100%;
         padding: 2.25rem;
     }
 
@@ -190,9 +191,9 @@
     }
 
     .crop {
-        position: relative;
-        width: 96px;
-        height: 136px;
+        /* position: relative; */
+        width: 80px;
+        height: 128px;
         overflow: hidden;
         transform: scale(1.2);
         transition: transform 0.3s;
@@ -204,8 +205,15 @@
     }
 
     .crop img {
+        position: absolute;
         width: 512px;
         height: 256px;
+        left: -8px;
+        top: -8px;
+    }
+
+    .crop img.custom {
+        /* Implement custom fitting for dynamic size here */
     }
 
     .equip-text {
@@ -231,7 +239,7 @@
 
     .info-text {
         position: absolute;
-        bottom: 7em;
+        bottom: 5.75em;
         left: 50%;
         transform: translateX(-50%);
         padding: 4px 8px;
@@ -244,15 +252,15 @@
     }
 
     .info-text-bottom {
-        bottom: 11em;
+        bottom: 7.5em;
         left: 50%;
         transform: translateX(-50%);
         position: absolute;
         transition: opacity 0.3s;
         font-family: 'Press Start 2P', serif;
-        font-size: 10px;
-        color: #7e7e7e;
-        text-shadow: 2px 2px #d0d0d0;
+        font-size: 11px;
+        color: white;
+        text-shadow: 1.25px 1.25px #d0d0d0;
         cursor: default;
     }
 

@@ -1,66 +1,50 @@
 <script>
-  import { createEventDispatcher, onMount } from "svelte";
   import { invoke } from "@tauri-apps/api/tauri";
   import CapeCarousel from "./CapeCarousel.svelte";
   import CapeEditor from "./CapeEditor.svelte";
+  import { defaultUser } from "../../stores/credentialsStore.js";
+  import { launcherOptions } from "../../stores/optionsStore.js";
+  import { addNotification } from "../../stores/notificationStore.js";
+  import { noriskLog } from "../../utils/noriskUtils.js";
 
-  const dispatch = createEventDispatcher()
-
-  export let options;
   let capes = null;
   let capeHash = null;
   let isLoading = true;
-  let requests = [
-    { text: "CAPE EDIT" },
-    { text: "ALLTIME" },
-    { text: "WEEKLY" },
-    { text: "OWNED" }
-  ];
   let currentRequest = 0;
 
-  onMount(() => {
-    //requestTrendingCapes(1)
-  });
-
   async function requestTrendingCapes(alltime) {
-    let account = options.accounts.find(obj => obj.uuid === options.currentUuid);
-    if (account !== null) {
-      if (options.currentUuid !== null) {
-        await invoke("request_trending_capes", {
-          noriskToken: options.experimentalMode ? account.experimentalToken : account.noriskToken,
-          uuid: options.currentUuid,
-          alltime: alltime,
-          limit: 30,
-        }).then((result) => {
-          console.log("Requesting Trending capes", result);
-          capes = result;
-        }).catch(e => {
-          console.error(e);
-        });
-      }
+    if ($defaultUser) {
+      await invoke("request_trending_capes", {
+        noriskToken: $launcherOptions.experimentalMode ? $defaultUser.norisk_credentials.experimental.value : $defaultUser.norisk_credentials.production.value,
+        uuid: $defaultUser.id,
+        alltime: alltime,
+        limit: 30,
+      }).then((result) => {
+        noriskLog("Requesting Trending capes: " + JSON.stringify(result));
+        capes = result;
+      }).catch(error => {
+        addNotification(error);
+      });
     }
   }
 
   async function requestOwnedCapes() {
-    let account = options.accounts.find(obj => obj.uuid === options.currentUuid);
-    if (account !== null) {
-      if (options.currentUuid !== null) {
-        await invoke("request_owned_capes", {
-          noriskToken: options.experimentalMode ? account.experimentalToken : account.noriskToken,
-          uuid: options.currentUuid,
-          limit: 30,
-        }).then((result) => {
-          console.debug("Requesting owned capes", result);
-          capes = result;
-        }).catch(e => {
-          console.error(e);
-        });
-      }
+    if ($defaultUser) {
+      await invoke("request_owned_capes", {
+        noriskToken: $launcherOptions.experimentalMode ? $defaultUser.norisk_credentials.experimental.value : $defaultUser.norisk_credentials.production.value,
+        uuid: $defaultUser.id,
+        limit: 30,
+      }).then((result) => {
+        noriskLog("Requesting Owned capes: " + JSON.stringify(result));
+        capes = result;
+      }).catch(error => {
+        addNotification(error);
+      });
     }
   }
 
-  async function handleNextRequest() {
-    currentRequest = (currentRequest + 1) % requests.length;
+  async function switchTab(tab) {
+    currentRequest = tab;
     capes = null;
     if (currentRequest === 1) {
       await requestTrendingCapes(1);
@@ -71,24 +55,19 @@
     }
   }
 
-  function preventSelection(event) {
-    event.preventDefault();
-  }
-
   async function getNoRiskUserByUUID() {
-    if (options.currentUuid !== null) {
+    if ($defaultUser) {
       await invoke("get_cape_hash_by_uuid", {
-        uuid: options.currentUuid
+        uuid: $defaultUser.id,
       }).then((user) => {
         if (user) {
           capeHash = user;
         } else {
-          console.log("No Cape Found");
+          noriskLog("No cape found for user: " + $defaultUser.id);
         }
         isLoading = false;
-      }).catch(e => {
-        alert("Failed to Request User by UUID: " + e);
-        console.error(e);
+      }).catch(error => {
+        addNotification("Failed to Request User by UUID: " + error);
         isLoading = false;
       });
     }
@@ -98,59 +77,69 @@
 </script>
 
 <div class="wrapper">
-  {#if currentRequest === 0}
-    {#if !isLoading}
-      <CapeEditor bind:options on:fetchNoRiskUser={getNoRiskUserByUUID} bind:capeHash />
+  <div class="tab-wrapper">
+    <!-- svelte-ignore a11y-click-events-have-key-events -->
+    <h1 on:click={() => switchTab(0)} class:primary-text={currentRequest === 0}>EDITOR</h1>
+    <!-- svelte-ignore a11y-click-events-have-key-events -->
+    <div class="button-wrapper">
+      <h2 on:click={() => switchTab(1)} class:primary-text={currentRequest === 1}>ALL TIME</h2>
+      <h2 on:click={() => switchTab(2)} class:primary-text={currentRequest === 2}>WEEKLY</h2>
+      <h2 on:click={() => switchTab(3)} class:primary-text={currentRequest === 3}>OWNED</h2>
+    </div>
+  </div>
+  <div class="cape-wrapper">
+    {#if currentRequest === 0}
+      {#if !isLoading}
+        <CapeEditor on:fetchNoRiskUser={getNoRiskUserByUUID} bind:capeHash />
+      {/if}
+    {:else}
+      {#if capes != null}
+        <CapeCarousel on:fetchNoRiskUser={getNoRiskUserByUUID} bind:capes />
+      {/if}
     {/if}
-  {:else}
-    {#if capes != null}
-      <CapeCarousel on:fetchNoRiskUser={getNoRiskUserByUUID} bind:options bind:capes />
-    {/if}
-  {/if}
-  <!-- svelte-ignore a11y-click-events-have-key-events -->
-  <h1 on:selectstart={preventSelection} on:mousedown={preventSelection}
-      on:click={handleNextRequest}><span>&star;</span> {requests[currentRequest].text} <span>&star;</span></h1>
+  </div>
 </div>
-<!-- svelte-ignore a11y-click-events-have-key-events -->
-<h1 class="home-button" on:click={() => dispatch("home")}>[BACK]</h1>
 
 <style>
     .wrapper {
+        height: 100%;
         display: flex;
         flex-direction: column;
         align-items: center;
+        justify-content: center;
     }
 
-    .wrapper h1 {
+    .cape-wrapper {
+        height: 100%;
+    }
+
+    .tab-wrapper h1,
+    .tab-wrapper h2 {
         font-family: 'Press Start 2P', serif;
-        font-size: 35px;
-        cursor: pointer;
-        position: absolute;
-        top: 4em;
-        transition: transform 0.3s;
+        padding: 1em;
+        font-size: 1em;
+        transition: transform 0.3s, color 0.3s;
     }
 
-    .wrapper h1 span {
-        color: gold;
-        text-shadow: 3px 2px #5d4c03;
+    .tab-wrapper h1:hover,
+    .tab-wrapper h2:hover {
+        transform: scale(1.5);
     }
 
-    .wrapper h1:hover {
-        transform: scale(1.2);
+    .tab-wrapper h1 {
+        font-size: 1.5em;
     }
 
-    .home-button {
-        position: absolute;
-        bottom: 1em; /* Abstand vom oberen Rand anpassen */
-        transition: transform 0.3s;
-        font-size: 20px;
-        color: #e8e8e8;
-        text-shadow: 2px 2px #7a7777;
-        font-family: 'Press Start 2P', serif;
-        cursor: pointer;
+    .tab-wrapper {
+        display: flex;
+        width: 100%;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
     }
 
-    .home-button:hover {
-        transform: scale(1.2);
+    .button-wrapper {
+        display: flex;
+        flex-direction: row;
     }
 </style>

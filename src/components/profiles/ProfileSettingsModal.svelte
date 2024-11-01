@@ -1,7 +1,10 @@
 <script>
-  import {createEventDispatcher} from "svelte";
-
+  import { createEventDispatcher } from "svelte";
   import ConfigTextInput from "../config/inputs/ConfigTextInput.svelte";
+  import { openConfirmPopup } from "../../utils/popupUtils.js";
+  import { noriskLog } from "../../utils/noriskUtils.js";
+  import { addNotification } from "../../stores/notificationStore.js";
+
   const dispatch = createEventDispatcher()
 
   export let showModal;
@@ -14,16 +17,22 @@
     if (!createMode) {
         saveData()
     }
-    showModal = false;
+    animateOut();
   }
+
+  const ILLIGAL_CHARACTERS = ['/', '\\', ':', '*', '?', '"', '<', '>', '|'];
 
   let dialog; // HTMLDialogElement
 
   $: if (dialog && showModal) dialog.showModal();
+  let animateOutNow = false;
 
   async function saveData() {
     if (settingsProfile.name == '') {
         settingsProfile.name = "Empty Name?";
+    } else if (settingsProfile.name.split('').some(c => ILLIGAL_CHARACTERS.includes(c))) {
+        addNotification("Profile name contains illegal characters.", "ERROR");
+        return;
     }
     if (experimentalMode) {
         launcherProfiles.experimentalProfiles[launcherProfiles.experimentalProfiles.indexOf(settingsProfile)] = settingsProfile;
@@ -34,26 +43,35 @@
     dispatch('update');
   }
 
+  function confirmDelete() {
+    openConfirmPopup({
+      title: "Delete Profile",
+      content: "Are you sure you want to delete this profile?",
+      onConfirm: deleteProfile
+    });
+  }
+
   async function deleteProfile() {
-    // we need await!
-    const confirm = await window.confirm("Are you sure you want to delete this profile?")
-    if (confirm) {
-        console.info("DELETING PROFILE", settingsProfile);
-        if (experimentalMode) {
-            launcherProfiles.experimentalProfiles.splice(launcherProfiles.experimentalProfiles.indexOf(settingsProfile), 1);
-            launcherProfiles.selectedExperimentalProfiles[settingsProfile.branch] = launcherProfiles.experimentalProfiles[0].id;
-        } else {
-            launcherProfiles.mainProfiles.splice(launcherProfiles.mainProfiles.indexOf(settingsProfile), 1);
-            launcherProfiles.selectedMainProfiles[settingsProfile.branch] = launcherProfiles.mainProfiles[0].id;
-        }
-        closeSettings();
-        dispatch('update');
+    noriskLog(`DELETING PROFILE: ${settingsProfile.name} (${settingsProfile.branch})`);
+    if (experimentalMode) {
+        launcherProfiles.experimentalProfiles.splice(launcherProfiles.experimentalProfiles.indexOf(settingsProfile), 1);
+        launcherProfiles.selectedExperimentalProfiles[settingsProfile.branch] = launcherProfiles.experimentalProfiles[0].id;
+    } else {
+        launcherProfiles.mainProfiles.splice(launcherProfiles.mainProfiles.indexOf(settingsProfile), 1);
+        launcherProfiles.selectedMainProfiles[settingsProfile.branch] = launcherProfiles.mainProfiles[0].id;
     }
+    closeSettings();
+    addNotification(`Profile "${settingsProfile.name}" has been deleted.`, "INFO");
+    dispatch('update');
   }
 
   async function createProfile() {
     if (settingsProfile.name == '' || settingsProfile.name.toLowerCase() == `${settingsProfile.branch} - Default`.toLowerCase()) return;
-    console.info("CREATING PROFILE " + settingsProfile);
+    if (settingsProfile.name.split('').some(c => ILLIGAL_CHARACTERS.includes(c))) {
+        addNotification("Profile name contains illegal characters.", "ERROR");
+        return;
+    }
+    noriskLog(`CREATING PROFILE: ${settingsProfile.name} (${settingsProfile.branch})`);
     if (experimentalMode) {
         launcherProfiles.experimentalProfiles.push(settingsProfile);
         launcherProfiles.selectedExperimentalProfiles[settingsProfile.branch] = settingsProfile.id;
@@ -63,7 +81,16 @@
     }
     launcherProfiles.store();
     closeSettings();
+    addNotification(`Profile "${settingsProfile.name}" has been created.`, "INFO");
     dispatch('update');
+  }
+
+  function animateOut() {
+    animateOutNow = true;
+    setTimeout(() => {
+      showModal = false;
+      dialog.close();
+    }, 100);
   }
 
   function preventSelection(event) {
@@ -74,6 +101,8 @@
 <!-- svelte-ignore a11y-click-events-have-key-events -->
 <dialog
   bind:this={dialog}
+  class:animateOut={animateOutNow}
+  class:animateIn={!animateOutNow}
   on:close={closeSettings}
   on:click|self={() => dialog.close()}
 >
@@ -100,7 +129,7 @@
       </div>
     {:else}
       <div class="delete-profile-button-wrapper">
-        <p class="red-text" on:selectstart={preventSelection} on:mousedown={preventSelection} on:click={deleteProfile}>DELETE PROFILE</p>
+        <p class="red-text" on:selectstart={preventSelection} on:mousedown={preventSelection} on:click={confirmDelete}>DELETE PROFILE</p>
       </div>
     {/if}
   </div>
@@ -149,7 +178,7 @@
         background-color: var(--background-color);
         border: 5px solid black;
         width: 34em;
-        height: 25em;
+        height: 23.25em;
         border-radius: 0.2em;
         padding: 0;
         position: fixed; /* Fixierte Positionierung */
@@ -170,12 +199,42 @@
         animation: fade 0.2s ease-out;
     }
 
+    dialog.animateIn {
+        animation: open 0.2s ease-out;
+    }
+
+    dialog.animateOut {
+        animation: close 0.2s ease-out;
+    }
+
     @keyframes fade {
         from {
             opacity: 0;
         }
         to {
             opacity: 1;
+        }
+    }
+
+    @keyframes open {
+        from {
+            transform: translate(-50%, 200%);
+            opacity: 0;
+        }
+        to {
+            transform: translate(-50%, -50%);
+            opacity: 1;
+        }
+    }
+
+    @keyframes close {
+        from {
+            transform: translate(-50%, -50%);
+            opacity: 1;
+        }
+        to {
+            transform: translate(-50%, 200%);
+            opacity: 0;
         }
     }
 
@@ -191,14 +250,12 @@
         align-content: center;
         align-items: center;
         justify-content: center;
+        padding: 1em;
+      }
+      
+      .create-profile-button-wrapper p {
         font-family: 'Press Start 2P', serif;
         font-size: 18px;
-        padding: 1em;
-        text-shadow: 2px 2px #086b08;
-    }
-
-    .create-profile-button-wrapper p {
-        color: #00ff00;
         padding: 0.3em;
         cursor: pointer;
         transition: transform 0.3s;

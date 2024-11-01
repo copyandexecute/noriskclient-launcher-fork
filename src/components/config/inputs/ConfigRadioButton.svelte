@@ -4,8 +4,11 @@
 
   export let value;
   export let text;
+  export let isExclusive = false;
+  export let isExclusiveLabel = "";
   export let reversed = false;
   export let spaced = false;
+  export let id = "";
 
   function preventSelection(event) {
     event.preventDefault();
@@ -14,16 +17,20 @@
 
 <div class="wrapper" class:spaced={spaced}>
   {#if reversed}
-    <h1 on:selectstart={preventSelection}
-        on:mousedown={preventSelection} class="nes-font">{text}</h1>
+    <h1 on:selectstart={preventSelection} on:mousedown={preventSelection} class="nes-font">{text}</h1>
+    {#if isExclusive}
+      <h1 class="nes-font exclusive" title="You can see this because you have special permissions.">({isExclusiveLabel})</h1>
+    {/if}
   {/if}
   <label class="nes-switch">
-    <input type="checkbox" bind:checked={value} on:change={(e) => dispatch("toggle")}>
+    <input id={id} type="checkbox" bind:checked={value} on:change={(e) => dispatch("toggle")}>
     <span class="nes-slider"></span>
   </label>
   {#if !reversed}
-    <h1 on:selectstart={preventSelection}
-        on:mousedown={preventSelection} class="nes-font">{text}</h1>
+    <h1 on:selectstart={preventSelection} on:mousedown={preventSelection} class="nes-font">{text}</h1>
+    {#if isExclusive}
+      <h1 class="nes-font exclusive" title="You can see this because you have special permissions.">({isExclusiveLabel})</h1>
+    {/if}
   {/if}
 </div>
 
@@ -32,6 +39,12 @@
         display: flex;
         align-items: center;
         gap: 1em;
+    }
+
+    .exclusive {
+      font-size: 12.5px;
+      color: var(--dev-font-color);
+      text-shadow: 1.25px 1.25px var(--dev-font-color-text-shadow);
     }
 
     .spaced {
@@ -50,6 +63,7 @@
         display: inline-block;
         width: 40px;
         height: 24px;
+        border-radius: 5px;
     }
 
     .nes-slider {

@@ -1,18 +1,13 @@
 // #![feature(exit_status_error)] - wait for feature to be stable
 #![cfg_attr(
-all(not(debug_assertions), target_os = "windows"),
-windows_subsystem = "windows"
+    all(not(debug_assertions), target_os = "windows"),
+    windows_subsystem = "windows"
 )]
 
-use std::{fs, io};
-use std::{
-    thread::sleep,
-    time::{Duration, Instant},
-};
+use std::fs;
 
-use anyhow::Result;
 use directories::ProjectDirs;
-use log::{debug, error, info, LevelFilter, SetLoggerError, trace, warn};
+use log::{info, LevelFilter};
 use log4rs::{
     append::{
         console::{ConsoleAppender, Target},
@@ -22,13 +17,15 @@ use log4rs::{
     },
     config::{Appender, Config, Root},
     encode::pattern::PatternEncoder,
-    filter::threshold::ThresholdFilter,
 };
 use once_cell::sync::Lazy;
 use reqwest::Client;
+use tauri::utils::Error::Architecture;
+use crate::utils::{get_architecture, is_rosetta};
 
 pub mod app;
 pub mod minecraft;
+pub mod custom_servers;
 
 mod error;
 mod utils;
@@ -62,14 +59,17 @@ const TRIGGER_FILE_SIZE: u64 = 2 * 1024 * 1000;
 /// Number of archive log files to keep
 const LOG_FILE_COUNT: u32 = 10;
 
-pub fn main() -> Result<()> {
+pub fn main() -> anyhow::Result<()> {
+    // Path fix
+    let _ = fix_path_env::fix();
+
     let log_folder = LAUNCHER_DIRECTORY.data_dir().join("logs");
     let latest_log = log_folder.join("latest.log");
     let archive_folder = log_folder.join("archive").join("launcher.{}.log");
 
     // Build a stdout logger.
     let stderr = ConsoleAppender::builder()
-        .encoder(Box::new(PatternEncoder::new("[{d(%d-%m-%Y %H:%M:%S)}] {l} - {m}\n")))
+        .encoder(Box::new(PatternEncoder::new("[{d(%d-%m-%Y %H:%M:%S)}] | {h({l}):5.5} | {m}\n")))
         .target(Target::Stderr).build();
 
     // Create a policy to use with the file logging
@@ -83,7 +83,7 @@ pub fn main() -> Result<()> {
     // Logging to log file. (with rolling)
     let logfile = log4rs::append::rolling_file::RollingFileAppender::builder()
         // Pattern: https://docs.rs/log4rs/*/log4rs/encode/pattern/index.html
-        .encoder(Box::new(PatternEncoder::new("[{d(%d-%m-%Y %H:%M:%S)}] {l} - {m}\n")))
+        .encoder(Box::new(PatternEncoder::new("[{d(%d-%m-%Y %H:%M:%S)}] | {h({l}):5.5} | {m}\n")))
         .build(latest_log.clone(), Box::new(policy))
         .unwrap();
 
@@ -101,7 +101,7 @@ pub fn main() -> Result<()> {
             Root::builder()
                 .appender("logfile")
                 .appender("stderr")
-                .build(LevelFilter::Trace),
+                .build(LevelFilter::Debug),
         )
         .unwrap();
 
@@ -111,6 +111,7 @@ pub fn main() -> Result<()> {
     // once you are done.
     let _handle = log4rs::init_config(config)?;
 
+    info!("");
     info!("###############################");
     info!("");
     info!("");
@@ -118,12 +119,17 @@ pub fn main() -> Result<()> {
     info!("");
     info!("");
     info!("###############################");
+    info!("");
+
+    info!("Rosetta: {}", is_rosetta());
+    info!("Architecture: {}", get_architecture().get_simple_name()?.to_string());
 
 
     // application directory
     info!("Creating launcher directories...");
     fs::create_dir_all(LAUNCHER_DIRECTORY.data_dir())?;
     fs::create_dir_all(LAUNCHER_DIRECTORY.config_dir())?;
+    info!("Finish launcher directories...");
 
     // app
     app::gui::gui_main();

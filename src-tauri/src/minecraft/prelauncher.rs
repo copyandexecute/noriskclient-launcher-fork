@@ -6,8 +6,7 @@ use log::{debug, info};
 use tokio::fs;
 
 use crate::app::api::{LoaderSubsystem, ModSource, LoaderMod, NoRiskLaunchManifest};
-use crate::app::app_data::LauncherProfile;
-use crate::app::modrinth_api::{Datapack, ModrinthApiEndpoints, ResourcePack, Shader};
+use crate::app::modrinth_api::{Datapack, ResourcePack, Shader};
 use crate::error::LauncherError;
 use crate::minecraft::launcher;
 use crate::minecraft::launcher::{LauncherData, LaunchingParameter};
@@ -18,7 +17,7 @@ use crate::utils::{download_file, get_maven_artifact_path};
 ///
 /// Prelaunching client
 ///
-pub(crate) async fn launch<D: Send + Sync>(norisk_token: &str, launch_manifest: NoRiskLaunchManifest, launching_parameter: LaunchingParameter, additional_mods: Vec<LoaderMod>, shaders: Vec<Shader>, resourcepacks: Vec<ResourcePack>, datapacks: Vec<Datapack>, progress: LauncherData<D>, window: Arc<Mutex<tauri::Window>>) -> Result<()> {
+pub(crate) async fn launch<D: Send + Sync>(norisk_token: &str, uuid: &str, launch_manifest: NoRiskLaunchManifest, launching_parameter: LaunchingParameter, additional_mods: Vec<LoaderMod>, shaders: Vec<Shader>, resourcepacks: Vec<ResourcePack>, datapacks: Vec<Datapack>, progress: LauncherData<D>, window: Arc<Mutex<tauri::Window>>) -> Result<()> {
     info!("Loading minecraft version manifest...");
     let mc_version_manifest = VersionManifest::download().await?;
 
@@ -37,8 +36,6 @@ pub(crate) async fn launch<D: Send + Sync>(norisk_token: &str, launch_manifest: 
     retrieve_shaders(&data_directory, &launch_manifest, &shaders, &progress).await?;
     retrieve_resourcepacks(&data_directory, &launch_manifest, &resourcepacks, &progress).await?;
     retrieve_datapacks(&data_directory, &launch_manifest, &datapacks, &progress).await?;
-
-    copy_custom_mods(&data_directory, &launch_manifest, &progress).await?;
 
     info!("Loading version profile...");
     let manifest_url = match subsystem {
@@ -66,7 +63,7 @@ pub(crate) async fn launch<D: Send + Sync>(norisk_token: &str, launch_manifest: 
 
     info!("Launching {}...", launch_manifest.build.branch);
 
-    launcher::launch(norisk_token,&data_directory, launch_manifest, version, launching_parameter, progress, window).await?;
+    launcher::launch(norisk_token, uuid, &data_directory, launch_manifest, version, launching_parameter, progress, window).await?;
     Ok(())
 }
 
@@ -126,14 +123,13 @@ pub async fn retrieve_and_copy_mods(data: &Path, manifest: &NoRiskLaunchManifest
 
             match &current_mod.source {
                 ModSource::Repository { repository, artifact, url } => {
-                    let mut download_url: String = "".to_owned();
-                    if url.clone().is_some() {
-                        download_url = url.clone().unwrap();
+                    let download_url = if let Some(url) = url.clone() {
+                        url
                     } else {
                         let repository_url = manifest.repositories.get(repository).ok_or_else(|| LauncherError::InvalidVersionProfile(format!("There is no repository specified with the name {}", repository)))?;
                         let maven_artifact_path = get_maven_artifact_path(artifact)?;
-                        download_url = format!("{}{}", repository_url, maven_artifact_path);
-                    }
+                        format!("{}{}", repository_url, maven_artifact_path)
+                    };
 
                     info!("downloading mod {} from {}", artifact, download_url);
 
@@ -164,7 +160,7 @@ pub async fn retrieve_shaders(data: &Path, manifest: &NoRiskLaunchManifest, shad
     let mut installed_shaders: Vec<Shader> = Vec::new();
 
     // Download shaders
-    let max = get_max(shaders.len());
+    let mut max = get_max(shaders.len());
 
     for (shader_idx, current_shader) in shaders.iter().enumerate() {
         if installed_shaders.iter().any(|shader| {
@@ -173,7 +169,8 @@ pub async fn retrieve_shaders(data: &Path, manifest: &NoRiskLaunchManifest, shad
             let already_installed = installed_shaders.iter().find(|&shader| {
                 return shader.slug == current_shader.slug;
             }).unwrap();
-            info!("Skipping Shader {:?} cuz {:?} is already installed", &current_shader, already_installed);
+            println!("Skipping Shader {:?} cuz {:?} is already installed", &current_shader, already_installed);
+            max -= 100;
             continue;
         }
 
@@ -198,7 +195,8 @@ pub async fn retrieve_shaders(data: &Path, manifest: &NoRiskLaunchManifest, shad
                 info!("Installed Shader {}", &current_shader.file_name);
             }
         } else {
-            info!("Shader {} is already downloaded", &current_shader.file_name);
+            println!("Shader {} is already downloaded", &current_shader.file_name);
+            max -= 100;
         }
 
         installed_shaders.push(current_shader.clone())
@@ -307,25 +305,6 @@ pub async fn retrieve_datapacks(data: &Path, manifest: &NoRiskLaunchManifest, da
         }
 
         installed_datapacks.push(current_datapack.clone())
-    }
-
-    Ok(())
-}
-
-pub async fn copy_custom_mods(data: &Path, manifest: &NoRiskLaunchManifest, progress: &impl ProgressReceiver) -> Result<()> {
-    let mod_cache_path = data.join("custom_mods").join(format!("{}-{}", manifest.build.branch, manifest.build.mc_version));
-    let mods_path = data.join("gameDir").join(&manifest.build.branch).join("mods");
-
-    fs::create_dir_all(&mod_cache_path).await?;
-    fs::create_dir_all(&mods_path).await?;
-
-    // Copy all mods from custom_mods to mods
-    let mut mods_read = fs::read_dir(&mod_cache_path).await?;
-    while let Some(entry) = mods_read.next_entry().await? {
-        if entry.file_type().await?.is_file() {
-            progress.progress_update(ProgressUpdate::set_label(format!("Copied custom mod {}", entry.file_name().to_str().unwrap_or_default())));
-            fs::copy(entry.path(), mods_path.join(entry.file_name())).await?;
-        }
     }
 
     Ok(())

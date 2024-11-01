@@ -1,503 +1,673 @@
 <script>
-    import {invoke} from "@tauri-apps/api";
-    import {removeFile, renameFile} from '@tauri-apps/api/fs';
-    import {open} from "@tauri-apps/api/dialog";
-    import VirtualList from "../../utils/VirtualList.svelte";
-    import ModrinthSearchBar from "../widgets/ModrinthSearchBar.svelte";
-    import ModItem from "./ModItem.svelte";
-    import {createEventDispatcher, onDestroy} from "svelte";
-    import {watch} from "tauri-plugin-fs-watch-api";
-    import {listen} from '@tauri-apps/api/event';
+  import { invoke } from "@tauri-apps/api";
+  import { open } from "@tauri-apps/api/dialog";
+  import ModrinthSearchBar from "../widgets/ModrinthSearchBar.svelte";
+  import ModItem from "./ModItem.svelte";
+  import { tick, onMount } from "svelte";
+  import { listen } from "@tauri-apps/api/event";
+  import { branches, currentBranchIndex } from "../../../stores/branchesStore.js";
+  import { launcherOptions } from "../../../stores/optionsStore.js";
+  import { profiles } from "../../../stores/profilesStore.js";
+  import { defaultUser } from "../../../stores/credentialsStore.js";
+  import { addNotification } from "../../../stores/notificationStore.js";
+  import { getNoRiskToken, noriskUser, noriskLog } from "../../../utils/noriskUtils.js";
 
-    const dispatch = createEventDispatcher()
+  export let isServersideInstallation = false;
 
-    export let currentBranch;
-    export let options;
-    export let launcherProfiles;
-    let launcherProfile = null;
-    let customMods = [];
-    let mods = [];
-    let featuredMods = [];
-    let launchManifest = null;
-    let searchterm = "";
-    let filterterm = "";
-    let currentTabIndex = 0;
-    let fileWatcher;
+  $: currentBranch = $branches[$currentBranchIndex];
+  $: options = $launcherOptions;
+  $: launcherProfiles = $profiles;
+  let launcherProfile = null;
+  let customModFiles = [];
+  let baseMods = null;
+  let mods = [];
+  let featuredMods = [];
+  let blacklistedMods = [];
+  let modVersions = {};
+  let launchManifest = null;
+  let searchterm = "";
+  let filterterm = "";
+  let currentTabIndex = 0;
+  let listScroll = 0;
 
-    let search_offset = 0;
-    let search_limit = 30;
-    let search_index = "relevance";
+  let search_offset = 0;
+  let search_limit = 30;
+  let search_index = "relevance";
 
-    let filterCategories = [
-        {
-            type: 'Environments',
-            entries: [
-                {id: 'client_side', name: 'Client',},
-                {id: 'server_side', name: 'Server'}
-            ]
+  let filterCategories = [
+    {
+      type: "Environments",
+      entries: [
+        { id: "client_side", name: "Client" },
+        { id: "server_side", name: "Server" },
+      ],
+    },
+    {
+      type: "Categories",
+      entries: [
+        { id: "adventure", name: "Adventure" },
+        { id: "cursed", name: "Cursed" },
+        { id: "decoration", name: "Decoration" },
+        { id: "economy", name: "Economy" },
+        { id: "equipment", name: "Equipment" },
+        { id: "food", name: "Food" },
+        { id: "game-mechanics", name: "Game Mechanics" },
+        { id: "library", name: "Library" },
+        { id: "magic", name: "Magic" },
+        { id: "management", name: "Management" },
+        { id: "minigame", name: "Minigame" },
+        { id: "mobs", name: "Mobs" },
+        { id: "optimization", name: "Optimization" },
+        { id: "social", name: "Social" },
+        { id: "storage", name: "Storage" },
+        { id: "technology", name: "Technology" },
+        { id: "transportation", name: "Transportation" },
+        { id: "utility", name: "Utility" },
+        { id: "worldgen", name: "Worldgen" },
+      ],
+    },
+  ];
+  let filters = {};
+
+  if (!isServersideInstallation) {
+    filterCategories.shift();
+  }
+
+  $: loginData = $defaultUser;
+
+  let lastFileDrop = -1;
+  listen("tauri://file-drop", files => {
+    if (currentTabIndex !== 1) {
+      return;
+    }
+
+    const time = Date.now();
+    if (time - lastFileDrop < 1000) return;
+    lastFileDrop = time;
+
+    let todo = new Set();
+    files.payload.forEach(l => todo.add(l));
+    
+    installCustomMods(todo);
+  });
+
+  // check if an element exists in array using a comparer function
+  // comparer : function(currentElement)
+  Array.prototype.inArray = function(comparer) {
+    for (let i = 0; i < this.length; i++) {
+      if (comparer(this[i])) return true;
+    }
+    return false;
+  };
+
+  // adds an element to the array if it does not already exist using a comparer
+  // function
+  Array.prototype.pushIfNotExist = function(element, comparer) {
+    if (!this.inArray(comparer)) {
+      this.push(element);
+    }
+  };
+
+  async function updateMods(newMods) {
+    mods = newMods;
+    
+    // Try to scroll to the previous position
+    try {
+      await tick();
+      document.getElementById('scrollList').scrollTop = listScroll ?? 0;
+    } catch(_) {}
+  }
+
+  async function updateProfileMods(newMods) {
+    launcherProfile.mods = newMods;
+    
+    // Try to scroll to the previous position
+    try {
+      await tick();
+      document.getElementById('scrollList').scrollTop = listScroll ?? 0;
+    } catch(_) {}
+  }
+
+  function scrollToBottom() {
+    // Try to scroll to the bottom
+    try {
+      document.getElementById('scrollList').scrollTop = document.getElementById('scrollList').scrollHeight;
+    } catch (_) {}
+  }
+
+  async function getLaunchManifest() {
+    await invoke("get_launch_manifest", {
+      branch: currentBranch,
+      noriskToken: getNoRiskToken(),
+      uuid: loginData.id,
+    }).then((result) => {
+      console.debug("Launch Manifest", result);
+      launchManifest = result;
+    }).catch((error) => {
+      addNotification("Failed to get launch manifest: " + error);
+    });
+  }
+
+  async function getBlacklistedMods() {
+    await invoke("get_blacklisted_mods").then((mods) => {
+      console.debug("Blacklisted Mods", mods);
+      blacklistedMods = mods;
+    }).catch((error) => {
+      console.error(error);
+    });
+  }
+
+  async function getCustomModsFilenames() {
+    await invoke("get_custom_mods_filenames", {
+      options: options,
+      profileName: launcherProfile.name
+    }).then((fileNames) => {
+      console.debug("Custom Mods", fileNames);
+      customModFiles = fileNames;
+    }).catch((error) => {
+      addNotification(error);
+    });
+  }
+
+  async function getModVersions(slug) {
+    if (modVersions[slug]) {
+      return modVersions[slug];
+    }
+
+    await invoke("get_project_version", {
+      slug: slug,
+      params: `?game_versions=["${launchManifest.build.mcVersion}"]&loaders=["fabric"]`,
+    }).then(async (result) => {
+      modVersions[slug] = result.map(v => v.version_number);
+      console.debug(`Project Versions of ${slug}`, modVersions[slug]);
+    }).catch((error) => {
+      addNotification(error);
+      modVersions[slug] = [];
+    });
+
+    return modVersions[slug];
+  }
+
+  async function installModAndDependencies(mod) {
+    mod.loading = true;
+    updateMods(mods);
+    await invoke("install_mod_and_dependencies", {
+      slug: mod.slug,
+      version: null,
+      params: `?game_versions=["${launchManifest.build.mcVersion}"]&loaders=["fabric"]`,
+      requiredMods: launchManifest.mods,
+    }).then((result) => {
+      const blockedDependencies = result.dependencies.filter(d => blacklistedMods.some(slug => slug == d.value.source.artifact.split(":")[1]))
+      if (blockedDependencies.length > 0) {
+        addNotification(`Failed to install mod because of incompatible dependencies:<br><br>${blockedDependencies.map(d => d.value.name).join(', ')}`, "ERROR", null, 5000);
+        return;
+      }
+
+      result.image_url = mod.icon_url;
+      launcherProfile.mods.pushIfNotExist(result, function(e) {
+        return e.value.name === result.value.name;
+      });
+      mod.loading = false;
+      updateMods(mods);
+      updateProfileMods(launcherProfile.mods);
+      launcherProfiles.store();
+    }).catch((error) => {
+      addNotification(error);
+    });
+  }
+
+  async function changeModVersion(slug, version) {
+    let mod = launcherProfile.mods.find(mod => mod.value.source.artifact.split(":")[1].toUpperCase() === slug.toUpperCase());
+    if (!mod) {
+      addNotification(`Failed to change version of ${slug} because it is not installed.`);
+      return;
+    }
+
+    await invoke("install_mod_and_dependencies", {
+      slug: slug,
+      version: version,
+      params: `?game_versions=["${launchManifest.build.mcVersion}"]&loaders=["fabric"]`,
+      requiredMods: launchManifest.mods,
+    }).then(async (result) => {
+      const blockedDependencies = result.dependencies.filter(d => blacklistedMods.some(slug => slug == d.value.source.artifact.split(":")[1]))
+      if (blockedDependencies.length > 0) {
+        addNotification(`Failed to install mod because of incompatible dependencies:<br><br>${blockedDependencies.map(d => d.value.name).join(', ')}`, "ERROR", null, 5000);
+        return;
+      }
+
+      const original = mod;
+      // Replace with new version info 
+      mod.value = result.value;
+      mod.dependencies = result.dependencies;
+      launcherProfile.mods.splice(launcherProfile.mods.indexOf(original), 1, mod);
+     
+      const before = launcherProfile.mods;
+      updateProfileMods([]);
+      await tick();
+      updateProfileMods(before);
+      launcherProfiles.store();
+    }).catch((error) => {
+      addNotification(error);
+    });
+  }
+
+  function checkIfRequiredOrInstalled(item) {
+    const slug = item.slug;
+
+    if (launchManifest.mods.some((mod) => {
+      return mod.source.artifact.split(":")[1].toUpperCase() === slug.toUpperCase();
+    })) {
+      if (launchManifest.mods.find((mod) =>
+        mod.source.artifact.split(":")[1].toUpperCase() === slug.toUpperCase(),
+      ).required) {
+        return "REQUIRED";
+      } else {
+        return "RECOMENDED";
+      }
+    }
+    
+    if (!launcherProfile.mods.some((mod) => {
+      return mod.value.source.artifact.split(":")[1].toUpperCase() === slug.toUpperCase();
+    }) && launcherProfile.mods.some((mod) => mod.dependencies.some((dependency) => dependency.value.source.artifact.split(':')[1].toUpperCase() == slug.toUpperCase()))) {
+      return "DEPENDENCY";
+    }
+
+    if (launcherProfile.mods.some((mod) => {
+      return mod.value.source.artifact.split(":")[1].toUpperCase() === slug.toUpperCase();
+    })) {
+      return "INSTALLED";
+    }
+    return "INSTALL";
+  }
+
+  async function getBaseMods() {
+    await invoke("get_featured_mods", {
+      branch: currentBranch,
+      mcVersion: launchManifest.build.mcVersion,
+    }).then((result) => {
+      console.debug("Featured Mods", result);
+      result.forEach(mod => mod.featured = true);
+      baseMods = result;
+      featuredMods = result;
+      launchManifest.mods.forEach(async mod => {
+        if (!mod.required) {
+          const slug = mod.source.artifact.split(":")[1];
+          let author;
+          let iconUrl = "src/images/norisk_logo.png";
+          let description = "A custom NoRiskClient Mod.";
+          if (mod.source.repository !== "norisk" && mod.source.repository !== "CUSTOM") {
+            await invoke("get_mod_info", { slug }).then(info => {
+              author = info.author ?? null;
+              iconUrl = info.icon_url;
+              description = info.description;
+            }).catch((error) => {
+              addNotification(error);
+            });
+          }
+          if (!mod.enabled) disableRecomendedMod(slug);
+          baseMods.push({
+            author: author,
+            description: description,
+            icon_url: iconUrl,
+            slug: slug,
+            title: mod.name,
+          });
+        }
+      });
+      console.log("Base Mods", baseMods);
+      
+    }).catch((error) => {
+      addNotification(error);
+    });
+  }
+
+  async function searchMods() {
+    if (searchterm == "" && search_offset === 0) {
+      if (baseMods == null) {
+        await getBaseMods();
+      }
+      updateMods([]);
+      // Wait for the UI to update
+      await tick();
+      updateMods(baseMods);
+    } else {
+      // WENN WIR DAS NICHT MACHEN BUGGEN LIST ENTRIES INEINANDER, ICH SCHLAGE IRGENDWANN DEN TYP DER DIESE VIRTUAL LIST GEMACHT HAT
+      // Update: Ich habe ne eigene Virtual List gemacht 📉
+      updateMods([]);
+    }
+
+    let client_server_side_filters = "";
+    const client_side = Object.values(filters).find(filter => filter.id === "client_side");
+    const server_side = Object.values(filters).find(filter => filter.id === "server_side");
+    if (!client_side && !server_side) {
+      client_server_side_filters = "";
+    } else if (client_side.enabled && server_side.enabled) {
+      client_server_side_filters = ", [\"client_side:required\"], [\"server_side:required\"]";
+    } else if (client_side.enabled && !server_side.enabled) {
+      client_server_side_filters = ", [\"client_side:optional\",\"client_side:required\"], [\"server_side:optional\",\"server_side:unsupported\"]";
+    } else if (!client_side.enabled && server_side.enabled) {
+      client_server_side_filters = ", [\"client_side:optional\",\"client_side:unsupported\"], [\"server_side:optional\",\"server_side:required\"]";
+    }
+
+    const notEnvironmentFilter = (filter) => filter.id !== "client_side" && filter.id !== "server_side";
+
+    await invoke("search_mods", {
+      params: {
+        facets: `[["versions:${launchManifest.build.mcVersion}"], ["project_type:mod"], ["categories:fabric"]${Object.values(filters).filter(filter => filter.enabled && notEnvironmentFilter(filter)).length > 0 ? ", " : ""}${Object.values(filters).filter(filter => filter.enabled && notEnvironmentFilter(filter)).map(filter => `["categories:'${filter.id}'"]`).join(", ")}${client_server_side_filters}]`,
+        index: search_index,
+        limit: search_limit + (searchterm === "" ? launchManifest.mods.length : 0),
+        offset: search_offset,
+        query: searchterm,
+      },
+    }).then((result) => {
+      console.debug("Search Mod Result", result);
+      
+      if (!$noriskUser?.isDev) {
+        console.debug("Filtering blacklisted mods...");
+        const length = result.hits.length;
+        result.hits = result.hits.filter(mod => !blacklistedMods.includes(mod.slug));
+        console.debug(`Filtered ${length - result.hits.length} blacklisted mods.`);
+      }
+      result.hits.forEach(mod => {
+        mod.featured = featuredMods.find(featuredMod => featuredMod.slug === mod.slug);
+        mod.blacklisted = blacklistedMods.includes(mod.slug);
+      });
+      if (result.hits.length === 0) {
+        updateMods(null);
+      } else if ((search_offset == 0 && searchterm != "") || Object.values(filters).length > 0) {
+        updateMods(result.hits);;
+      } else {
+        updateMods([...mods, ...result.hits.filter(mod => searchterm != "" || (!launchManifest.mods.some((launchManifestMod) => {
+          return launchManifestMod.source.artifact.split(":")[1].toUpperCase() === mod.slug.toUpperCase();
+        }) && !featuredMods.some((featuredMod) => {
+          return featuredMod.slug.toUpperCase() === mod.slug.toUpperCase();
+        })))]);
+      }
+    }).catch((error) => {
+      addNotification(error);
+    });
+  }
+
+  function loadMore() {
+    search_offset += search_limit + (searchterm === "" ? launchManifest.mods.length : 0);
+    searchMods();
+  }
+
+  async function toggleInstalledMod(mod) {
+    mod.value.enabled = !mod.value.enabled;
+    updateProfileMods(launcherProfile.mods);
+    launcherProfiles.store();
+    const keep = launcherProfile.mods;
+    updateProfileMods([]);
+    setTimeout(() => {
+      updateProfileMods(keep);
+    }, 0);
+  }
+
+  async function deleteInstalledMod(slug, isCustom = false) {
+    let index = launcherProfile.mods.findIndex((element) => {
+      return element.value.source.artifact.split(":")[isCustom ? 2 : 1].toUpperCase() === slug.toUpperCase();
+    });
+    
+    if (index !== -1) {
+      launcherProfile.mods.splice(index, 1);
+      launcherProfiles.store();
+
+      // Fragt nicht, sonst squashen mod item names ineinander?????
+      const prev = [mods, launcherProfile.mods];
+      updateMods([]);
+      updateProfileMods([]);
+      await tick();
+      updateMods(prev[0]);
+      updateProfileMods(prev[1]);
+    }
+  }
+
+  async function disableRecomendedMod(slug) {
+    if (launcherProfile.mods.find(mod => mod.value.name.toUpperCase() === slug.toUpperCase())) {
+      return;
+    }
+    launcherProfile.mods.push({
+      title: slug,
+      image_url: "",
+      value: {
+        required: false,
+        enabled: false,
+        name: slug,
+        source: {
+          type: "repository",
+          repository: "",
+          artifact: `PLACEHOLDER:${slug}`,
+          url: "",
         },
-        {
-            type: 'Categories',
-            entries: [
-                {id: 'adventure', name: 'Adventure'},
-                {id: 'cursed', name: 'Cursed'},
-                {id: 'decoration', name: 'Decoration'},
-                {id: 'economy', name: 'Economy'},
-                {id: 'equipment', name: 'Equipment'},
-                {id: 'food', name: 'Food'},
-                {id: 'game-mechanics', name: 'Game Mechanics'},
-                {id: 'library', name: 'Library'},
-                {id: 'magic', name: 'Magic'},
-                {id: 'management', name: 'Management'},
-                {id: 'minigame', name: 'Minigame'},
-                {id: 'mobs', name: 'Mobs'},
-                {id: 'optimization', name: 'Optimization'},
-                {id: 'social', name: 'Social'},
-                {id: 'storage', name: 'Storage'},
-                {id: 'technology', name: 'Technology'},
-                {id: 'transportation', name: 'Transportation'},
-                {id: 'utility', name: 'Utility'},
-                {id: 'worldgen', name: 'Worldgen'}
-            ]
-        }
-    ];
-    let filters = {};
+      },
+      dependencies: [],
+    });
+    updateMods(mods);
+    updateProfileMods(launcherProfile.mods);
+    launcherProfiles.store();
+  }
 
-    const loginData = options.accounts.find(obj => obj.uuid === options.currentUuid);
-
-    listen('tauri://file-drop', files => {
-        if (currentTabIndex != 1) {
-            return;
-        }
-        installCustomMods(files.payload)
-    })
-
-    // check if an element exists in array using a comparer function
-    // comparer : function(currentElement)
-    Array.prototype.inArray = function (comparer) {
-        for (let i = 0; i < this.length; i++) {
-            if (comparer(this[i])) return true;
-        }
-        return false;
-    };
-
-    // adds an element to the array if it does not already exist using a comparer
-    // function
-    Array.prototype.pushIfNotExist = function (element, comparer) {
-        if (!this.inArray(comparer)) {
-            this.push(element);
-        }
-    };
-
-    async function getLaunchManifest() {
-        await invoke("get_launch_manifest", {
-            branch: currentBranch,
-            noriskToken: options.experimentalMode ? loginData.experimentalToken : loginData.noriskToken,
-        }).then((result) => {
-            console.debug("Launch Manifest", result);
-            launchManifest = result
-            getCustomModsFilenames()
-            createFileWatcher()
-        }).catch((err) => {
-            console.error(err);
-        });
+  async function enableRecomendedMod(slug) {
+    let index = launcherProfile.mods.findIndex((element) => {
+      return element.value.name.toUpperCase() === slug.toUpperCase();
+    });
+    if (index !== -1) {
+      launcherProfile.mods.splice(index, 1);
+      updateMods(mods);
+      updateProfileMods(launcherProfile.mods);
+      launcherProfiles.store();
     }
+  }
 
-    async function getCustomModsFilenames() {
-        await invoke("get_custom_mods_filenames", {
-            options: options,
-            branch: launchManifest.build.branch,
-            mcVersion: launchManifest.build.mcVersion
-        }).then((mods) => {
-            console.debug("Custom Mods", mods)
-            customMods = mods;
-        }).catch((error) => {
-            alert(error)
-        })
+  async function deleteCustomModFile(fileName) {
+    await invoke("delete_custom_mod_file", {
+      options: options,
+      profileName: launcherProfile.name,
+      file: fileName,
+    }).then(() => {
+      customModFiles.splice(customModFiles.indexOf(fileName), 1);
+      deleteInstalledMod(fileName, true);
+    }).catch((error) => {
+      addNotification(error);
+    });
+  }
+
+  async function handleSelectCustomMods() {
+    try {
+      const locations = await open({
+        defaultPath: "/",
+        multiple: true,
+        filters: [{ name: "Custom Mods", extensions: ["jar"] }],
+      });
+      if (locations instanceof Array) {
+        installCustomMods(locations);
+      }
+    } catch (error) {
+      addNotification("Failed to select file using dialog: " + error);
     }
+  }
 
-    async function installModAndDependencies(mod) {
-        await invoke("install_mod_and_dependencies", {
-            slug: mod.slug,
-            params: `?game_versions=["${launchManifest.build.mcVersion}"]&loaders=["fabric"]`,
-            requiredMods: launchManifest.mods
-        }).then((result) => {
-            result.image_url = mod.icon_url;
-            launcherProfile.mods.pushIfNotExist(result, function (e) {
-                return e.value.name === result.value.name;
-            })
-            mod.loading = false
-            mods = mods
-            launcherProfile.mods = launcherProfile.mods;
-            launcherProfiles.store()
-        }).catch((err) => {
-            console.error(err);
-        });
-    }
+  async function installCustomMods(locations) {
+    locations.forEach(async (location) => {
+      let splitter = "";
+      if (location.split("/")[0] == "") {
+        splitter = "/";
+      } else {
+        splitter = "\\";
+      }
+      const fileName = location.split(splitter)[location.split(splitter).length - 1];
 
-    function checkIfRequiredOrInstalled(slug) {
-        if (launchManifest.mods.some((mod) => {
-            return mod.source.artifact.split(":")[1].toUpperCase() === slug.toUpperCase()
-        })) {
-            if (launchManifest.mods.find((mod) =>
-                mod.source.artifact.split(":")[1].toUpperCase() === slug.toUpperCase()
-            ).required) {
-                return "REQUIRED"
-            } else {
-                return "RECOMENDED"
-            }
-        }
-        if (launcherProfile.mods.some((mod) => {
-            return mod.value.source.artifact.split(":")[1].toUpperCase() === slug.toUpperCase()
-        })) {
-            return "INSTALLED"
-        }
-        return "INSTALL"
-    }
+      if (!fileName.endsWith(".jar")) {
+        addNotification(`Cannot install ${fileName}!<br><br>Only .jar files are supported.`);
+        return;
+      }
 
-    async function searchMods() {
-        if (searchterm === "" && search_offset === 0) {
-            await invoke("get_featured_mods", {
-                branch: currentBranch,
-                mcVersion: launchManifest.build.mcVersion,
-            }).then((result) => {
-                console.debug("Featured Mods", result);
-                result.forEach(mod => mod.featured = true);
-                mods = result;
-                featuredMods = result;
-                launchManifest.mods.forEach(async mod => {
-                    if (!mod.required) {
-                        const slug = mod.source.artifact.split(':')[1];
-                        let author;
-                        let iconUrl = 'src/images/norisk_logo.png';
-                        let description = "A custom NoRiskClient Mod."
-                        if (mod.source.repository != 'norisk') {
-                            await invoke('get_mod_info', { slug }).then(info => {
-                                author = info.author ?? null;
-                                iconUrl = info.icon_url;
-                                description = info.description;
-                            }).catch((err) => {
-                                console.error(err);
-                            });
-                        }
-                        if (!mod.enabled) disableRecomendedMod(slug);
-                        mods.push({
-                            author: author,
-                            description: description,
-                            icon_url: iconUrl,
-                            slug: slug,
-                            title: mod.name
-                        });
-                    }
-                });
-            }).catch((err) => {
-                console.error(err);
-            });
-        }
+      if (customModFiles.includes(fileName)) {
+        addNotification(`Cannot install ${fileName}!<br><br>Mod already exists.`);
+        return;
+      }
 
-        let client_server_side_filters = '';
-        const client_side = Object.values(filters).find(filter => filter.id == 'client_side');
-        const server_side = Object.values(filters).find(filter => filter.id == 'server_side');
-        if (!client_side && !server_side) {
-            client_server_side_filters = '';
-        } else if (client_side.enabled && server_side.enabled) {
-            client_server_side_filters = ', ["client_side:required"], ["server_side:required"]';
-        } else if (client_side.enabled && !server_side.enabled) {
-            client_server_side_filters = ', ["client_side:optional","client_side:required"], ["server_side:optional","server_side:unsupported"]';
-        } else if (!client_side.enabled && server_side.enabled) {
-            client_server_side_filters = ', ["client_side:optional","client_side:unsupported"], ["server_side:optional","server_side:required"]';
-        }
-
-        const notEnvironmentFilter = (filter) => filter.id !== 'client_side' && filter.id !== 'server_side';
-        
-        await invoke("search_mods", {
-            params: {
-                facets: `[["versions:${launchManifest.build.mcVersion}"], ["project_type:mod"], ["categories:fabric"]${Object.values(filters).filter(filter => filter.enabled && notEnvironmentFilter(filter)).length > 0 ? ', ' : ''}${Object.values(filters).filter(filter => filter.enabled && notEnvironmentFilter(filter)).map(filter => `["categories:'${filter.id}'"]`).join(', ')}${client_server_side_filters}]`,
-                index: search_index,
-                limit: search_limit + (searchterm == '' ? launchManifest.mods.length : 0),
-                offset: search_offset,
-                query: searchterm,
-            },
-        }).then((result) => {
-            console.debug("Search Mod Result", result);
-            result.hits.forEach(mod => {
-                mod.featured = featuredMods.filter(featuredMod => featuredMod.slug === mod.slug).length > 0;
-            });
-            if (result.hits.length === 0) {
-                mods = null;
-            } else if ((search_offset == 0 && searchterm != '') || Object.values(filters).length > 0) {
-                mods = result.hits;
-            } else {
-                mods = [...mods, ...result.hits.filter(mod => searchterm != '' || (!launchManifest.mods.some((launchManifestMod) => {
-                    return launchManifestMod.source.artifact.split(":")[1].toUpperCase() === mod.slug.toUpperCase()
-                }) && !featuredMods.some((featuredMod) => {
-                    return featuredMod.slug.toUpperCase() === mod.slug.toUpperCase()})))];
-            }
-        }).catch((err) => {
-            console.error(err);
-        });
-    }
-
-    function loadMore() {
-        search_offset += search_limit + (searchterm == '' ? launchManifest.mods.length : 0);
-        searchMods();
-    }
-
-    async function toggleInstalledMod(mod) {
-        mod.value.enabled = !mod.value.enabled;
-        launcherProfile.mods = launcherProfile.mods;
-        launcherProfiles.store();
-        const keep = launcherProfile.mods;
-        launcherProfile.mods = [];
-        setTimeout(() => {
-            launcherProfile.mods = keep;
-        }, 0)
-    }
-
-    async function deleteInstalledMod(slug) {
-        let index = launcherProfile.mods.findIndex((element) => {
-            return element.value.source.artifact.split(":")[1].toUpperCase() === slug.toUpperCase()
-        })
-        if (index !== -1) {
-            launcherProfile.mods.splice(index, 1);
-            mods = mods;
-            launcherProfile.mods = launcherProfile.mods;
-            launcherProfiles.store();
-        }
-    }
-
-    async function disableRecomendedMod(slug) {
-        if (launcherProfile.mods.find(mod => mod.value.name.toUpperCase() === slug.toUpperCase())) {
-            return;
-        }
+      noriskLog(`Installing custom Mod ${fileName}`);
+      await invoke("save_custom_mods_to_folder", {
+        options: options,
+        profileName: launcherProfile.name,
+        file: { name: fileName, location: location },
+      }).then(() => {
         launcherProfile.mods.push({
-            title: slug,
-            image_url: '',
-            value: {
-                required: false,
-                enabled: false,
-                name: slug,
-                source: {
-                    type: 'repository',
-                    repository: '',
-                    artifact: `PLACEHOLDER:${slug}`,
-                    url: ''
-                }
+          title: fileName,
+          image_url: "",
+          value: {
+            required: false,
+            enabled: true,
+            name: fileName,
+            source: {
+              type: "repository",
+              repository: "CUSTOM",
+              artifact: `CUSTOM:${launcherProfile.name}:${fileName}`,
+              url: "",
             },
-            dependencies: []
-        })
-        mods = mods
-        launcherProfile.mods = launcherProfile.mods;
+          },
+          dependencies: [],
+        });
+        updateMods(mods);
+        updateProfileMods(launcherProfile.mods);
+        customModFiles.push(fileName);
         launcherProfiles.store();
+      }).catch((error) => {
+        if (error.includes("os error 32")) return;
+        addNotification(error);
+      });
+    });
+  }
+
+  async function load() {
+    if (options.experimentalMode) {
+      const selectedProfile = launcherProfiles.selectedExperimentalProfiles[currentBranch];
+      launcherProfile = launcherProfiles.experimentalProfiles.find(p => p.id == selectedProfile);
+      if (!launcherProfile) {
+        launcherProfiles.experimentalProfiles.splice(launcherProfiles.experimentalProfiles.indexOf(launcherProfiles.experimentalProfiles.find(p => p.id == selectedProfile)), 1);
+        launcherProfile = launcherProfiles.experimentalProfiles.find(p => p.name == `${currentBranch} - Default`);
+        launcherProfiles.selectedExperimentalProfiles[currentBranch] = launcherProfile.id;
+        launcherProfiles.store();
+      }
+    } else {
+      const selectedProfile = launcherProfiles.selectedMainProfiles[currentBranch];
+      launcherProfile = launcherProfiles.mainProfiles.find(p => p.id == selectedProfile);
+      if (!launcherProfile) {
+        launcherProfiles.mainProfiles.splice(launcherProfiles.mainProfiles.indexOf(launcherProfiles.mainProfiles.find(p => p.id == selectedProfile)), 1);
+        launcherProfile = launcherProfiles.mainProfiles.find(p => p.name == `${currentBranch} - Default`);
+        launcherProfiles.selectedMainProfiles[currentBranch] = launcherProfile.id;
+        launcherProfiles.store();
+      }
     }
+    await getLaunchManifest();
+    await getBlacklistedMods();
+    await getCustomModsFilenames();
+    await searchMods();
+  }
 
-    async function enableRecomendedMod(slug) {
-        let index = launcherProfile.mods.findIndex((element) => {
-            return element.value.name.toUpperCase() === slug.toUpperCase()
-        })
-        if (index !== -1) {
-            launcherProfile.mods.splice(index, 1);
-            mods = mods
-            launcherProfile.mods = launcherProfile.mods;
-            launcherProfiles.store();
-        }
-    }
-
-    async function deleteCustomModFile(filename) {
-        await invoke("get_custom_mods_folder", {
-            options: options,
-            branch: launchManifest.build.branch,
-            mcVersion: launchManifest.build.mcVersion
-        }).then(async (folder) => {
-            await removeFile(folder + "/" + filename).then(() => {
-                getCustomModsFilenames()
-            }).catch((error) => {
-                alert(error)
-            })
-        }).catch((error) => {
-            alert(error)
-        })
-    }
-
-    async function toggleCustomModFile(filename) {
-        await invoke("get_custom_mods_folder", {
-            options: options,
-            branch: launchManifest.build.branch,
-            mcVersion: launchManifest.build.mcVersion
-        }).then(async (folder) => {
-            if (filename.endsWith(".disabled")) {
-                await renameFile(folder + "/" + filename, folder + "/" + filename.replace('.disabled', '')).then(() => {
-                    getCustomModsFilenames()
-                }).catch((error) => {
-                    alert(error)
-                })
-            } else {
-                await renameFile(folder + "/" + filename, folder + "/" + filename + ".disabled").then(() => {
-                    getCustomModsFilenames()
-                }).catch((error) => {
-                    alert(error)
-                })
-            }
-        }).catch((error) => {
-            alert(error)
-        })
-    }
-
-    async function createFileWatcher() {
-        await invoke("get_custom_mods_folder", {
-            options: options,
-            branch: launchManifest.build.branch,
-            mcVersion: launchManifest.build.mcVersion
-        }).then(async (folder) => {
-            console.debug("File Watcher Folder", folder)
-            // can also watch an array of paths
-            fileWatcher = await watch(
-                folder,
-                getCustomModsFilenames,
-                {recursive: true}
-            );
-        }).catch((error) => {
-            alert(error)
-        })
-    }
-
-    async function handleSelectCustomMods() {
-        try {
-            const locations = await open({
-                defaultPath: '/',
-                multiple: true,
-                filters: [{name:"Custom Mods", extensions: ["jar"]}]
-            })
-            if (locations instanceof Array) {
-                installCustomMods(locations)
-            }
-        } catch (e) {
-            alert("Failed to select file using dialog")
-        }
-    }
-
-    async function installCustomMods(locations) {
-        locations.forEach(async (location) => {
-            if (!location.endsWith(".jar")) {
-                return;
-            }
-            let splitter = ""
-            if (location.split("/")[0] == "") {
-                splitter = "/"
-            } else {
-                splitter = "\\"
-            }
-            const fileName = location.split(splitter)[location.split(splitter).length - 1];
-            console.log(`Installing custom Mod ${fileName}`)
-            await invoke("save_custom_mods_to_folder", {
-                options: options,
-                branch: launchManifest.build.branch,
-                mcVersion: launchManifest.build.mcVersion,
-                file: {name: fileName, location: location}
-            }).catch((error) => {
-                alert(error)
-            });
-            getCustomModsFilenames()
-        })
-    }
-
-    async function load() {
-        if (options.experimentalMode) {
-            const selectedProfile = launcherProfiles.selectedExperimentalProfiles[currentBranch];
-            launcherProfile = launcherProfiles.experimentalProfiles.find(p => p.id == selectedProfile);
-            if (!launcherProfile) {
-                launcherProfiles.experimentalProfiles.splice(launcherProfiles.experimentalProfiles.indexOf(launcherProfiles.experimentalProfiles.find(p => p.id == selectedProfile)), 1);
-                launcherProfile = launcherProfiles.experimentalProfiles.find(p => p.name == `${currentBranch} - Default`);
-                launcherProfiles.selectedExperimentalProfiles[currentBranch] = launcherProfile.id;
-                launcherProfiles.store();
-            }
-        } else {
-            const selectedProfile = launcherProfiles.selectedMainProfiles[currentBranch];
-            launcherProfile = launcherProfiles.mainProfiles.find(p => p.id == selectedProfile);
-            if (!launcherProfile) {
-                launcherProfiles.mainProfiles.splice(launcherProfiles.mainProfiles.indexOf(launcherProfiles.mainProfiles.find(p => p.id == selectedProfile)), 1);
-                launcherProfile = launcherProfiles.mainProfiles.find(p => p.name == `${currentBranch} - Default`);
-                launcherProfiles.selectedMainProfiles[currentBranch] = launcherProfile.id;
-                launcherProfiles.store();
-            }
-        }
-        await getLaunchManifest();
-        searchMods();
-    }
-
-    load()
-
-    onDestroy(() => {
-        fileWatcher = null;
-    })
+  onMount(() => {
+    load();
+  });
 </script>
 
-<!-- svelte-ignore a11y-click-events-have-key-events -->
-<h1 class="home-button" style="left: 220px;" on:click={() => dispatch("back")}>[BACK]</h1>
-<!-- svelte-ignore a11y-click-events-have-key-events -->
-<h1 class="home-button" style="right: 220px;" on:click={() => dispatch("home")}>[HOME]</h1>
 <div class="modrinth-wrapper">
-    <div class="navbar">
-        <!-- svelte-ignore a11y-click-events-have-key-events -->
-        <h1 class:active-tab={currentTabIndex === 0} on:click={() => currentTabIndex = 0}>Discover</h1>
-        <h2>|</h2>
-        <!-- svelte-ignore a11y-click-events-have-key-events -->
-        <h1 class:active-tab={currentTabIndex === 1} on:click={() => currentTabIndex = 1}>Installed</h1>
-        <h2>|</h2>
-        <!-- svelte-ignore a11y-click-events-have-key-events -->
-        <h1 on:click={handleSelectCustomMods}>Custom</h1>
-    </div>
-    {#if currentTabIndex === 0}
-        <ModrinthSearchBar on:search={() => {
+  <div class="navbar">
+    <!-- svelte-ignore a11y-click-events-have-key-events -->
+    <h1 class:primary-text={currentTabIndex === 0} on:click={() => {currentTabIndex = 0, listScroll = 0}}>Discover</h1>
+    <h2>|</h2>
+    <!-- svelte-ignore a11y-click-events-have-key-events -->
+    <h1 class:primary-text={currentTabIndex === 1} on:click={() => {currentTabIndex = 1, listScroll = 0}}>Installed</h1>
+    <h2>|</h2>
+    <!-- svelte-ignore a11y-click-events-have-key-events -->
+    <h1 on:click={handleSelectCustomMods}>Custom</h1>
+  </div>
+  {#if currentTabIndex === 0}
+    <ModrinthSearchBar on:search={() => {
             search_offset = 0;
             searchMods();
-        }} bind:searchTerm={searchterm} bind:filterCategories={filterCategories} bind:filters={filters} bind:options={options} placeHolder="Search for Mods on Modrinth..."/>
-        {#if mods !== null && mods.length > 0 }
-            <VirtualList height="30em" items={[...mods, mods.length >= 30 ? 'LOAD_MORE_MODS' : null]} let:item>
-                {#if item == 'LOAD_MORE_MODS'}
-                    <!-- svelte-ignore a11y-click-events-have-key-events -->
-                    <div class="load-more-button" on:click={loadMore}><p>LOAD MORE</p></div>
-                {:else if item != null}
-                        <ModItem
-                            text={checkIfRequiredOrInstalled(item.slug)}
-                            enabled={launcherProfile.mods.find(mod => mod.value.name == item.slug)?.value?.enabled ?? true}
-                            on:install={() => installModAndDependencies(item)}
-                            on:enable={() => enableRecomendedMod(item.slug)}
-                            on:disable={() => disableRecomendedMod(item.slug)}
-                            on:delete={() => deleteInstalledMod(item.slug)}
-                            type="RESULT"
-                            mod={item}/>
-                {/if}
-            </VirtualList>
-        {:else}
-            <h1 class="loading-indicator">{mods == null ? 'No Mods found.' : 'Loading...'}</h1>
-        {/if}
-    {:else if currentTabIndex === 1}
-        <ModrinthSearchBar on:search={() => {}} bind:searchTerm={filterterm} placeHolder="Filter installed Mods..."/>
-            {#if launcherProfile.mods.length > 0 || customMods.length > 0}
-            <VirtualList height="30em" items={[...customMods,...launcherProfile.mods].filter((mod) => {
-                let name = (mod?.value?.name ?? mod).toUpperCase()
-                return (mod?.value?.name != null || name.endsWith(".JAR") || name.endsWith(".DISABLED")) && name.includes(filterterm.toUpperCase()) && !mod?.value?.source?.artifact?.includes("PLACEHOLDER")
-            }).sort((a, b) => (a?.title ?? a).localeCompare(b?.title ?? b)) } let:item>
-                {#if (typeof item === 'string' || item instanceof String)}
-                    <ModItem
-                        text="CUSTOM"
-                        enabled={!item.toUpperCase().endsWith(".DISABLED")}
-                        on:delete={() => deleteCustomModFile(item)}
-                        on:toggle={() => toggleCustomModFile(item)}
-                        type="CUSTOM"
-                        mod={item}/>
-                {:else}
-                    <ModItem
-                        text="INSTALLED"
-                        on:delete={() => deleteInstalledMod(item.value.source.artifact.split(":")[1])}
-                        on:toggle={() => toggleInstalledMod(item)}
-                        type="INSTALLED"
-                        mod={item}/>
-                {/if}
-            </VirtualList>
-        {/if}
+        }} bind:searchTerm={searchterm} bind:filterCategories={filterCategories} bind:filters={filters}
+                       bind:options={options} placeHolder="Search for Mods on Modrinth..." />
+    {#if mods !== null && mods.length > 0 }
+      <div id="scrollList" class="scrollList" on:scroll={() => listScroll = document.getElementById('scrollList').scrollTop ?? 0}>
+        {#each [...mods, mods.length >= 30 ? 'LOAD_MORE_MODS' : null] as item}
+          {#if item === 'LOAD_MORE_MODS'}
+            <!-- svelte-ignore a11y-click-events-have-key-events -->
+            <div class="load-more-button" on:click={loadMore}><p class="primary-text">LOAD MORE</p></div>
+          {:else if item != null}
+            <ModItem
+              text={checkIfRequiredOrInstalled(item)}
+              enabled={launcherProfile.mods.find(mod => mod.value.name === item.slug)?.value?.enabled ?? true}
+              on:install={() => installModAndDependencies(item)}
+              on:enable={() => enableRecomendedMod(item.slug)}
+              on:disable={() => disableRecomendedMod(item.slug)}
+              on:delete={() => deleteInstalledMod(item.slug)}
+              type="RESULT"
+              modVersions={null}
+              mod={item} />
+          {/if}
+        {/each}
+      </div>
+    {:else}
+      <h1 class="loading-indicator">{mods == null ? 'No Mods found.' : 'Loading...'}</h1>
     {/if}
+  {:else if currentTabIndex === 1}
+    <ModrinthSearchBar on:search={() => {}} bind:searchTerm={filterterm} placeHolder="Filter installed Mods..." />
+    {#if launcherProfile.mods.length > 0}
+      <div id="scrollList" class="scrollList" on:scroll={() => listScroll = document.getElementById('scrollList').scrollTop}>
+        {#each (() => {
+          let dependencies = new Set();
+          launcherProfile.mods
+            .map(m => m.dependencies)
+            .flat()
+            .forEach(d => {
+              let slug = d.value.source.artifact.split(":")[1];
+              if (!Array.from(dependencies).some(d_ => d_.value.source.artifact.split(":")[1] == slug) && !launcherProfile.mods.some(m => m.value.source.artifact.split(":")[1] == slug)) {
+                d.parents = launcherProfile.mods.filter(m => m.dependencies.some(dependency => dependency.value.source.artifact.split(":")[1] == slug)).map(m => m.title);
+                dependencies.add(d);
+              }
+            });
+  
+          return [...launcherProfile.mods, ...dependencies].filter((mod) => {
+            let name = mod.value.name.toUpperCase()
+            return name.includes(filterterm.toUpperCase()) && !mod.value.source.artifact.includes("PLACEHOLDER")
+          }).map(mod => {
+            mod.isMissing = mod.value.source.repository == 'CUSTOM' && !customModFiles.includes(mod.value.source.artifact.split(':')[2]);
+            return mod
+          }).sort((a, b) => a.title.localeCompare(b.title))
+        })() as item}
+          {#if item.value.source.repository == 'CUSTOM'}
+            <ModItem
+              text="INSTALLED"
+              enabled={item.value.enabled}
+              on:delete={() => deleteCustomModFile(item.value.source.artifact.split(":")[2])}
+              on:toggle={() => toggleInstalledMod(item)}
+              type="CUSTOM"
+              modVersions={null}
+              mod={item} />
+          {:else}
+            <ModItem
+              text={launcherProfile.mods
+                .map(m => m.dependencies)
+                .flat()
+                .filter(d => !launcherProfile.mods.some(m => m.value.source.artifact.split(":")[1] == d.value.source.artifact.split(":")[1]))
+                .some(d => d.value.source.artifact.split(":")[1] == item.value.source.artifact.split(":")[1])
+              ? "DEPENDENCY" : "INSTALLED"}
+              on:delete={() => deleteInstalledMod(item.value.source.artifact.split(":")[1])}
+              on:toggle={() => toggleInstalledMod(item)}
+              on:changeVersion={(data) => changeModVersion(item.value.source.artifact.split(":")[1], data.detail.version)}
+              on:getVersions={async () => await getModVersions(item.value.source.artifact.split(":")[1])}
+              type="INSTALLED"
+              bind:modVersions={modVersions}
+              mod={item} />
+          {/if}
+        {/each}
+      </div>
+    {:else}
+      <h1 class="loading-indicator">{launcherProfile.mods.length < 1 ? 'No mods installed.' : 'Loading...'}</h1>
+    {/if}
+  {/if}
 </div>
 
 <style>
@@ -528,11 +698,6 @@
         cursor: default;
     }
 
-    .active-tab {
-        color: var(--primary-color);
-        text-shadow: 2px 2px var(--primary-color-text-shadow);
-    }
-
     .loading-indicator {
         display: flex;
         justify-content: center;
@@ -558,31 +723,21 @@
         transform: scale(1.2);
     }
 
-    .load-more-button p {
-        color: var(--primary-color);
-        text-shadow: 2px 2px var(--primary-color-text-shadow);
-    }
-
     .modrinth-wrapper {
         width: 100%;
+        padding: 1em;
         height: 100%;
         display: flex;
         flex-direction: column;
         gap: 0.7em;
     }
 
-    .home-button {
-        position: absolute;
-        bottom: 1em; /* Abstand vom oberen Rand anpassen */
-        transition: transform 0.3s;
-        font-size: 20px;
-        color: #e8e8e8;
-        text-shadow: 2px 2px #7a7777;
-        font-family: 'Press Start 2P', serif;
-        cursor: pointer;
-    }
-
-    .home-button:hover {
-        transform: scale(1.2);
+    .scrollList {
+        height: 30em;
+        position: relative;
+        overflow-y: auto;
+        overflow-x: hidden;
+        -webkit-overflow-scrolling:touch;
+        display: block;
     }
 </style>
