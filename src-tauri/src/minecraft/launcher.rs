@@ -197,6 +197,7 @@ pub async fn launch<D: Send + Sync>(multiple_instances: bool, norisk_token: &str
             })
         })
     ).buffer_unordered(launching_parameter.concurrent_downloads as usize).collect().await;
+
     for x in class_paths {
         if let Some(library_path) = x? {
             write!(class_path, "{}{}", &library_path, OS.get_path_separator()?)?;
@@ -363,6 +364,8 @@ pub async fn launch<D: Send + Sync>(multiple_instances: bool, norisk_token: &str
             })?
         );
     }
+
+    debug!("###Maped {:?}",mapped);
 
     launcher_data_arc.progress_update(ProgressUpdate::set_label("translation.launching"));
     launcher_data_arc.progress_update(ProgressUpdate::set_to_max());

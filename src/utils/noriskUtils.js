@@ -29,17 +29,13 @@ export async function getVersion() {
 }
 
 export async function checkApiStatus() {
-  let apiIsOnline = null;
-  await invoke("check_online_status").then((apiOnlineState) => {
-    apiIsOnline = apiOnlineState;
-    isApiOnline.set(apiOnlineState);
-    noriskLog(`API is ${apiIsOnline ? "online" : "offline"}!`);
-  }).catch(() => {
-    apiIsOnline = false;
-    isApiOnline.set(false);
-    noriskError("API is offline!");
-  });
-  return apiIsOnline;
+    return await invoke("check_online_status").then((apiOnlineState) => {
+        isApiOnline.set(apiOnlineState);
+        //noriskLog(`API is ${apiIsOnline ? "online" : "offline"}!`);
+    }).catch(() => {
+        isApiOnline.set(false);
+        //noriskError("API is offline!");
+    });
 }
 
 export async function getClientInstances() {
@@ -55,7 +51,7 @@ export async function runClient(branch, checkedForNewBranch = false) {
   let options = get(launcherOptions);
 
   if (!options.multipleInstances) {
-    let instance = get(clientInstances).find(value => true);
+    let instance = get(clientInstances).find(value => value.branch === branch);
     if (instance) {
       await push(`/start-progress/` + instance.id);
       return;

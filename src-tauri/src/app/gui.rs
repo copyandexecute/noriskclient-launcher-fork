@@ -447,12 +447,43 @@ pub async fn open_minecraft_logs_window(
     uuid: Uuid,
     is_live: bool,
     handle: tauri::AppHandle,
+    app_state: tauri::State<'_, AppState>,
 ) -> Result<(), Error> {
-    // Generate a random number
+    // Hole die Runner-Instanzen
+    let runner_instances = app_state.runner_instances.lock().unwrap();
+
+    // Finde die Instanz, die der gegebenen UUID entspricht
+    let instance = runner_instances
+        .iter()
+        .find(|instance| instance.id == uuid);
+
+    // Berechne den Branch und die zugehörige Nummer
+    let branch_with_number = if let Some(instance) = instance {
+        // Filtere die Instanzen mit dem gleichen Branch-Namen
+        let filtered: Vec<_> = runner_instances
+            .iter()
+            .filter(|inst| inst.branch == instance.branch)
+            .collect();
+
+        // Finde den Index der aktuellen Instanz innerhalb des gefilterten Arrays
+        let index = filtered.iter().position(|inst| inst.id == uuid).unwrap_or(0);
+
+        // Generiere den Namen mit der Nummer, wenn der Index > 0 ist
+        if index > 0 {
+            format!("{} ({})", instance.branch, index + 1)
+        } else {
+            instance.branch.clone()
+        }
+    } else {
+        // Wenn keine Instanz gefunden wurde, verwende einen Standardwert
+        "Unknown Branch (0)".to_string()
+    };
+
+    // Erstelle eine eindeutige Bezeichnung für das Fenster
     let random_number: u64 = rand::thread_rng().gen_range(100000..999999);
-    // Create a unique label using the random number
-    //hacky aber weiß sonst nicht wie lol
     let unique_label = format!("logs-{}:{}:{}", random_number, uuid, is_live);
+
+    // Baue das Fenster
     let window = tauri::WindowBuilder::new(
         &handle,
         unique_label,
@@ -460,11 +491,15 @@ pub async fn open_minecraft_logs_window(
     )
         .inner_size(1000.0, 800.0)
         .build()?;
-    let _ = window.set_title("Minecraft Logs");
+
+    // Setze den Titel des Fensters mit dem Branch und der Nummer
+    let _ = window.set_title(&format!("Minecraft Logs [{}]", branch_with_number));
     let _ = window.set_resizable(true);
     let _ = window.set_focus();
+
     Ok(())
 }
+
 
 #[tauri::command]
 pub async fn open_minecraft_crash_window(
@@ -987,14 +1022,7 @@ async fn request_norisk_branches(
     options: LauncherOptions,
     credentials: Credentials,
 ) -> Result<Vec<String>, Error> {
-    Ok(ApiEndpoints::norisk_branches(
-        &credentials
-            .norisk_credentials
-            .get_token(options.experimental_mode)
-            .await?,
-        &credentials.id.to_string(),
-    )
-        .await?)
+    Ok(NRCCache::get_branches(options, credentials).await?)
 }
 
 #[tauri::command]
@@ -1247,6 +1275,10 @@ fn handle_progress(
 ) -> anyhow::Result<()> {
     if let Some(instance) = instances.lock().unwrap().iter_mut().find(|r| r.id == instance_id) {
         instance.progress_updates.push(progress_update.clone());
+        // Ensure the list does not exceed 10 entries
+        if instance.progress_updates.len() > 10 {
+            instance.progress_updates.remove(0);
+        }
     }
     window
         .lock()
@@ -1450,6 +1482,7 @@ async fn run_client(
         progress_updates: Vec::new(),
         p_id: None,
         is_attached: true,
+        branch: branch.clone(),
     });
 
     thread::spawn(move || {
