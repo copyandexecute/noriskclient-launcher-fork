@@ -2,6 +2,11 @@
     import { createEventDispatcher } from "svelte";
     import { onMount, tick } from "svelte";
     import { openInfoPopup } from "../../../utils/popupUtils.js";
+    import FallbackIcon from "/src/images/modrinth.png";
+    import { translations } from '../../../utils/translationUtils.js';
+    
+    /** @type {{ [key: string]: any }} */
+    $: lang = $translations;
 
     const dispatch = createEventDispatcher()
 
@@ -36,9 +41,9 @@
         if (mod?.downloads < 1000) {
             return mod?.downloads;
         } else if (mod?.downloads < 1000000) {
-            return (mod?.downloads / 1000).toFixed(1) + "K";
+            return lang.addons.global.item.downloadCount.thousand.replace("{count}", (mod?.downloads / 1000).toFixed(1));
         } else {
-            return (mod?.downloads / 1000000).toFixed(1) + "M";
+            return lang.addons.global.item.downloadCount.million.replace("{count}", (mod?.downloads / 1000000).toFixed(1));
         }
     }
 </script>
@@ -47,9 +52,7 @@
     <div class="image-text-wrapper">
         <!-- svelte-ignore a11y-img-redundant-alt -->
         {#if type != 'CUSTOM'}
-            <div class="icon-fallback">
-                <img class="icon" src={mod.icon_url ?? mod.image_url} alt=" " onerror="this.style.display='none'">
-            </div>
+            <img class="icon" src={mod.icon_url ?? mod.image_url} alt=" " onerror="this.src='{FallbackIcon}'">
         {:else}
             <div class="custom-mod-icon">📦</div>
         {/if}
@@ -57,7 +60,7 @@
             <div class="href-wrapper">
                 {#if type != 'CUSTOM'}
                     <div class="name-div">
-                        <a class="mod-title" href={`https://modrinth.com/mod/${slug}`} target="_blank" title={name}>
+                        <a class="mod-title" href={(mod?.value?.source?.artifact?.includes("modrinth") || mod?.downloads) ? `https://modrinth.com/mod/${slug}` : undefined} target="_blank" title={name}>
                             {name.length > 20 && (text == 'INSTALL' || text == 'REQUIRED' || text == 'DEPENDENCY') ? name.substring(0, 19) + '...' : name}
                         </a>
                         {#if mod?.featured}
@@ -70,16 +73,18 @@
                 {/if}
                 {#if mod?.author != undefined && mod?.author != null}
                     <div class="author-container">
-                        <p class="author">by {mod.author ?? mod.value.author}</p>
-                        <b>•</b>
-                        <p class="download-count">{getMinimalisticDownloadCount()}</p>
+                        <p class="author">{lang.addons.global.item.madeBy.replace("{author}", mod.author ?? mod.value.author)}</p>
+                        {#if mod?.downloads != null}
+                            <b>•</b>
+                            <p class="download-count">{getMinimalisticDownloadCount()}</p>
+                        {/if}
                     </div>
                 {/if}
             </div>
             {#if mod.isMissing}
-                <p class="description isMissing red-text"><span style="text-shadow: none; font-size: 20px;">⚠️</span> File does not exist!</p>
+                <p class="description isMissing red-text"><span style="text-shadow: none; font-size: 20px;">⚠️</span> {lang.addons.mods.item.fileDoesNotExist}</p>
             {:else if type == "CUSTOM"}
-                <p class="description custom-mod-label">Custom Mod</p>
+                <p class="description custom-mod-label">{lang.addons.mods.item.customModDescription}</p>
             {:else if mod.parents != undefined && mod.parents.length > 0}
                 <!-- svelte-ignore a11y-click-events-have-key-events -->
                 <p
@@ -87,13 +92,13 @@
                     style="margin-top: 1em; opacity: 0.65;"
                     on:click={
                         mod.parents.join(", ").length > 180 ? () => openInfoPopup({
-                            title: "Used by:",
+                            title: lang.addons.mods.item.dependencyText.popup.title,
                             content: mod.parents.join(", "),
                             contentFontSize: "14px"
                         }) : () => {}
-                    }
-                >
-                    Used by: {mod.parents.join(", ").length > 180 ? mod.parents.join(", ").substring(0, 180) + "..." : mod.parents.join(", ")}
+                    }>
+                
+                    {lang.addons.mods.item.dependencyText.usedBy.replace("{parents}", mod.parents.length > 180 ? mod.parents.join(", ").substring(0, 180) + "..." : mod.parents.join(", "))}
                 </p>
             {:else if mod.description != undefined && mod.description != null}
                 <p class="description">{mod.description.length > 85 ? mod.description.substring(0, 85) + '...' : mod.description}</p>
@@ -109,7 +114,7 @@
                             }}
                         >
                             {#if isChangingVersion}
-                                <span>⏳</span> Changing version...
+                                <span>⏳</span> {lang.addons.mods.item.changingVersion}
                             {:else}
                                 <span>{versionDropdownOpen ? '⮟' : '⮞'} </span> {mod?.value?.source?.artifact?.split(':')[2]}
                             {/if}
@@ -128,39 +133,39 @@
     <div class="buttons">
         {#if mod?.loading ?? false}
             <h1 class="required-button primary-text">
-                LOADING
+                {lang.addons.global.item.loading}
             </h1>
         {:else if text === "INSTALL"}
             {#if mod?.featured}
                 <div style="display: flex; flex-direction: column; align-items: center;">
                     <h1 class="featured-label" style="margin-bottom: 15px;">
-                        FEATURED
+                        {lang.addons.global.item.featured}
                     </h1>
                     <!-- svelte-ignore a11y-click-events-have-key-events -->
                     <h1 class="install-button green-text" on:click={() => dispatch("install")}>
-                        INSTALL
+                        {lang.addons.global.item.button.install}
                     </h1>
                 </div>
             {:else}
                 <!-- svelte-ignore a11y-click-events-have-key-events -->
                 <h1 class="install-button green-text" on:click={() => dispatch("install")}>
-                    INSTALL
+                    {lang.addons.global.item.button.install}
                 </h1>
             {/if}
-        {:else if text === "RECOMENDED"}
+        {:else if text === "RECOMMENDED"}
             <div style="display: flex; flex-direction: column; align-items: center;">
                 <h1 class="required-button primary-text" style="margin-bottom: 15px;">
-                    RECOMENDED
+                    {lang.addons.mods.item.recommended}
                 </h1>
                 {#if enabled}
                     <!-- svelte-ignore a11y-click-events-have-key-events -->
                     <h1 class="red-text-clickable delete-button" on:click={() => dispatch("disable")}>
-                        DISABLE
+                        {lang.addons.global.item.button.disable}
                     </h1>
                 {:else}
                     <!-- svelte-ignore a11y-click-events-have-key-events -->
                     <h1 class="green-text-clickable install-button" on:click={() => dispatch("enable")}>
-                        ENABLE
+                        {lang.addons.global.item.button.enable}
                     </h1>
                 {/if}
             </div>
@@ -169,55 +174,55 @@
                 <div style="display: flex; flex-direction: column; align-items: center;">
                     {#if mod?.featured}
                         <h1 class="featured-label" style="margin-bottom: 15px;">
-                            FEATURED
+                            {lang.addons.global.item.featured}
                         </h1>
                     {/if}
                     <!-- svelte-ignore a11y-click-events-have-key-events -->
                     <h1 class="red-text-clickable delete-button" style={type != "RESULT" ? "margin-top: 15px;" : ""} on:click={() => dispatch("delete")}>
-                        DELETE
+                        {lang.addons.global.item.button.delete}
                     </h1>
                 </div>
             {:else}
                 {#if enabled}
                     <!-- svelte-ignore a11y-click-events-have-key-events -->
                     <h1 class="red-text-clickable delete-button" on:click={() => dispatch("toggle")}>
-                        DISABLE
+                        {lang.addons.global.item.button.disable}
                     </h1>
                 {:else}
                     <!-- svelte-ignore a11y-click-events-have-key-events -->
                     <h1 class="green-text-clickable install-button" on:click={() => dispatch("toggle")}>
-                        ENABLE
+                        {lang.addons.global.item.button.enable}
                     </h1>
                 {/if}
                 <!-- svelte-ignore a11y-click-events-have-key-events -->
                 <h1 class="red-text-clickable delete-button" style={type != "RESULT" ? "margin-top: 15px;" : ""} on:click={() => dispatch("delete")}>
-                    DELETE
+                    {lang.addons.global.item.button.delete}
                 </h1>
             {/if}
         {:else if text === "REQUIRED"}
             <h1 class="required-button primary-text">
-                REQUIRED
+                {lang.addons.mods.item.required}
             </h1>
         {:else if text === "DEPENDENCY"}
             <h1 class="required-button primary-text">
-                DEPENDENCY
+                {lang.addons.mods.item.dependency}
             </h1>
         {:else if type == "CUSTOM"}
             <!-- svelte-ignore a11y-click-events-have-key-events -->
             {#if enabled}
                 <!-- svelte-ignore a11y-click-events-have-key-events -->
                 <h1 class="red-text-clickable delete-button" on:click={() => dispatch("toggle")}>
-                    DISABLE
+                    {lang.addons.global.item.button.disable}
                 </h1>
             {:else}
                 <!-- svelte-ignore a11y-click-events-have-key-events -->
                 <h1 class="green-text-clickable install-button" on:click={() => dispatch("toggle")}>
-                    ENABLE
+                    {lang.addons.global.item.button.enable}
                 </h1>
             {/if}
             <!-- svelte-ignore a11y-click-events-have-key-events -->
             <h1 class="red-text-clickable delete-button" style="margin-top: 15px;" on:click={() => dispatch("delete")}>
-                DELETE
+                {lang.addons.global.item.button.delete}
             </h1>
         {/if}
     </div>
@@ -299,15 +304,6 @@
         background: var(--background-contrast-color);
         box-shadow: 3px 3px 1px rgba(0, 0, 0, 0.5);
         -webkit-user-drag: none;
-    }
-
-    .icon-fallback {
-        background-image: url("https://docs.modrinth.com/img/logo.svg");
-        min-width: 90px; 
-        min-height: 90px;
-        background-position: center center;
-        background-size: 90%;
-        background-repeat: no-repeat;
     }
 
     .mod-title {
@@ -449,7 +445,7 @@
         font-family: 'Press Start 2P', serif;
         font-size: 17px;
         color: #f0c91a;
-        text-shadow: 1.5px 1.5px var(--hover-color-text-shadow);
+        text-shadow: 1.5px 1.5px #9e8704;
         cursor: default;
     }
 

@@ -9,29 +9,30 @@
   import { listen } from "@tauri-apps/api/event";
   import { push } from "svelte-spa-router";
   import {
-    isClientRunning,
-    startProgress,
-    getNoRiskUser,
+    getClientInstances,
     getMaintenanceMode,
+    getNoRiskUser,
+    getVersion,
     noriskError,
     noriskLog,
-    checkIfClientIsRunning
   } from "./utils/noriskUtils.js";
-  import { 
-    getChangeLogs,
-    getAnnouncements,
-    getLastViewedPopups
-  } from "./utils/popupUtils.js";
+  import { getAnnouncements, getChangeLogs, getLastViewedPopups } from "./utils/popupUtils.js";
   import { appWindow } from "@tauri-apps/api/window";
   import { invoke } from "@tauri-apps/api";
   import { addNotification } from "./stores/notificationStore.js";
+  import { language, setLanguage, translations } from "./utils/translationUtils.js";
+
+  /** @type {{ [key: string]: any }} */
+  $: lang = $translations;
 
   onMount(async () => {
     setTimeout(async () => {
       await appWindow.show();
     }, 300);
-    await checkIfClientIsRunning();
+    await getVersion();
     await fetchOptions();
+    setLanguage($language);
+
     await fetchDefaultUserOrError(false);
     const isTokenValid = await getNoRiskUser();
     if (isTokenValid) {
@@ -45,13 +46,13 @@
       await startMicrosoftAuth();
     }
 
+    const clientInstancesInterval = setInterval(async () => {
+      //Hoffe das passt lol
+      await getClientInstances();
+    }, 2500);
+
     let unlisten = await listen("client-exited", () => {
-      isClientRunning.set([false, false]);
-      startProgress.set({
-        progressBarMax: 0,
-        progressBarProgress: 0,
-        progressBarLabel: "",
-      });
+      getClientInstances();
       push("/");
     });
 
@@ -81,12 +82,16 @@
       unlisten();
       minecraftCrashUnlisten();
       userUnlisten();
+      clearInterval(clientInstancesInterval);
     };
   });
 </script>
 
 <main>
-  <Router />
+  <!-- Ensure translations are loaded before showing UI -->
+  {#if lang?.dummy}
+    <Router />
+  {/if}
 </main>
 
 <style>

@@ -1,8 +1,8 @@
 import { invoke } from "@tauri-apps/api";
-import { launcherOptions } from "./optionsStore.js";
+import { launcherOptions, saveOptions } from "./optionsStore.js";
 import { get, writable } from "svelte/store";
 import { defaultUser } from "./credentialsStore.js";
-import { noriskLog } from "../utils/noriskUtils.js";
+import {isApiOnline, noriskLog} from "../utils/noriskUtils.js";
 
 export const branches = writable([]);
 export const currentBranchIndex = writable(0);
@@ -17,6 +17,11 @@ export async function fetchBranches() {
   if (!options) {
     branches.set([])
     return
+  }
+  if (!get(isApiOnline)) {
+    const latestBranch = options?.experimentalMode ? options.latestDevBranch : options.latestBranch;
+    branches.set([latestBranch])
+    return;
   }
   await invoke("request_norisk_branches", { options, credentials }).then(result => {
     const latestBranch = options?.experimentalMode ? options.latestDevBranch : options.latestBranch;
@@ -64,4 +69,12 @@ export function switchBranch(isLeft) {
       return (value + 1) % totalBranches;
     });
   }
+
+  const newBranch = get(branches)[get(currentBranchIndex)];
+  if (get(launcherOptions).experimentalMode) {
+    get(launcherOptions).latestDevBranch = newBranch;
+  } else {
+    get(launcherOptions).latestBranch = newBranch;
+  }
+  saveOptions();
 }

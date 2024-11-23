@@ -13,6 +13,10 @@
   import { defaultUser } from "../../../stores/credentialsStore.js";
   import { addNotification } from "../../../stores/notificationStore.js";
   import { getNoRiskToken, noriskUser, noriskLog } from "../../../utils/noriskUtils.js";
+  import { translations } from '../../../utils/translationUtils.js';
+    
+  /** @type {{ [key: string]: any }} */
+  $: lang = $translations;
 
   $: currentBranch = $branches[$currentBranchIndex];
   $: options = $launcherOptions;
@@ -27,6 +31,7 @@
   let searchterm = "";
   let filterterm = "";
   let currentTabIndex = 0;
+  let loadMoreButton = false;
   let fileWatcher;
   let listScroll = 0;
 
@@ -34,32 +39,7 @@
   let search_limit = 30;
   let search_index = "relevance";
 
-  let filterCategories = [
-    {
-      type: "Categories",
-      entries: [
-        { id: "adventure", name: "Adventure" },
-        { id: "cursed", name: "Cursed" },
-        { id: "decoration", name: "Decoration" },
-        { id: "economy", name: "Economy" },
-        { id: "equipment", name: "Equipment" },
-        { id: "food", name: "Food" },
-        { id: "game-mechanics", name: "Game Mechanics" },
-        { id: "library", name: "Library" },
-        { id: "magic", name: "Magic" },
-        { id: "management", name: "Management" },
-        { id: "minigame", name: "Minigame" },
-        { id: "mobs", name: "Mobs" },
-        { id: "optimization", name: "Optimization" },
-        { id: "social", name: "Social" },
-        { id: "storage", name: "Storage" },
-        { id: "technology", name: "Technology" },
-        { id: "transportation", name: "Transportation" },
-        { id: "utility", name: "Utility" },
-        { id: "worldgen", name: "Worldgen" },
-      ],
-    },
-  ];
+  let filterCategories = [];
   let filters = {};
 
   let lastFileDrop = -1;
@@ -152,18 +132,29 @@
   async function installDatapack(datapack) {
     datapack.loading = true;
     updateDatapacks(datapacks);
-    await invoke("install_datapack", {
+    await invoke("get_datapack", {
       slug: datapack.slug,
       params: `?game_versions=["${launchManifest.build.mcVersion}"]&loaders=["datapack"]`,
       world: world,
-    }).then((result) => {
+    }).then(async (result) => {
       launcherProfiles.addons[currentBranch].datapacks.pushIfNotExist(result, function(e) {
         return e.slug === result.slug && e.world_name === world;
       });
-      datapack.loading = false;
       updateDatapacks(datapacks);
       updateProfileDatapacks(launcherProfiles.addons[currentBranch].datapacks);
       launcherProfiles.store();
+
+      await invoke("download_datapack", {
+        options: $launcherOptions,
+        branch: launchManifest.build.branch,
+        world: world,
+        datapack: result,
+      }).then(() => {
+        datapack.loading = false;
+        updateDatapacks(datapacks);
+      }).catch((error) => {
+        addNotification(error);
+      });
     }).catch((error) => {
       addNotification(error);
     });
@@ -193,19 +184,18 @@
   }
 
   async function searchDatapacks() {
+    let oldDatapacks = datapacks;
+    
     if (searchterm == "" && search_offset === 0) {
       if (featuredDatapacks == null) {
         await getFeaturedDatapacks();
       }
-      updateDatapacks([]);
-      // Wait for the UI to update
-      await tick();
-      updateDatapacks(featuredDatapacks);
-    } else {
-      // WENN WIR DAS NICHT MACHEN BUGGEN LIST ENTRIES INEINANDER, ICH SCHLAGE IRGENDWANN DEN TYP DER DIESE VIRTUAL LIST GEMACHT HAT
-      // Update: Ich habe ne eigene Virtual List gemacht 📉
-      updateDatapacks([]);
+      oldDatapacks = featuredDatapacks;
     }
+      
+    // WENN WIR DAS NICHT MACHEN BUGGEN LIST ENTRIES INEINANDER, ICH SCHLAGE IRGENDWANN DEN TYP DER DIESE VIRTUAL LIST GEMACHT HAT
+    // Update: Ich habe ne eigene Virtual List gemacht 📉
+    updateDatapacks([]);
 
     await invoke("search_datapacks", {
       params: {
@@ -217,6 +207,8 @@
       },
     }).then((result) => {
       console.debug("Search Datapack Result", result);
+
+      loadMoreButton = result.hits.length >= search_limit;
 
       if (!$noriskUser?.isDev) {
         console.debug("Filtering Blacklisted Datapacks", blacklistedDatapacks);
@@ -233,7 +225,7 @@
       } else if ((search_offset == 0 && searchterm != "") || Object.values(filters).length > 0) {
         updateDatapacks(result.hits);
       } else {
-        updateDatapacks([...datapacks, ...result.hits.filter(datapack => searchterm != "" || !featuredDatapacks.some((element) => element.slug === datapack.slug))]);
+        updateDatapacks([...oldDatapacks, ...result.hits.filter(datapack => searchterm != "" || !featuredDatapacks.some((element) => element.slug === datapack.slug))]);
       }
     }).catch((error) => {
       addNotification(error);
@@ -252,15 +244,25 @@
 
     if (index !== -1) {
       launcherProfiles.addons[currentBranch].datapacks.splice(index, 1);
-      deleteDatapackFile(datapack?.file_name ?? datapack);
-      launcherProfiles.store();
+      updateDatapacks(datapacks);
 
-      const prev = [datapacks, launcherProfiles.addons[currentBranch].datapacks];
-      updateDatapacks([]);
-      updateProfileDatapacks([]);
-      await tick();
-      updateDatapacks(prev[0]);
-      updateProfileDatapacks(prev[1]);
+      await invoke("get_datapack", {
+        slug: datapack.slug,
+        params: `?game_versions=["${launchManifest.build.mcVersion}"]&loaders=["datapack"]`,
+        world: world,
+      }).then(async datapackVersion => {
+        deleteDatapackFile(datapackVersion.file_name);
+        
+        launcherProfiles.store();
+        const prev = [datapacks, launcherProfiles.addons[currentBranch].datapacks];
+        updateDatapacks([]);
+        updateProfileDatapacks([]);
+        await tick();
+        updateDatapacks(prev[0]);
+        updateProfileDatapacks(prev[1]);
+      }).catch((error) => {
+        addNotification(error);
+      });
     } else {
       deleteDatapackFile(datapack);
     }
@@ -308,7 +310,7 @@
         installCustomDatapacks(locations);
       }
     } catch (error) {
-      addNotification("Failed to select file using dialog: " + error);
+      addNotification(lang.addons.datapacks.notification.failedToSelectCustomDatapacks.replace("{error}", error));
     }
   }
 
@@ -325,7 +327,7 @@
       }
       const fileName = location.split(splitter)[location.split(splitter).length - 1];
       noriskLog(`Installing custom Datapack ${fileName}`);
-      await invoke("save_custom_datapacks_to_folder", {
+      await invoke("save_custom_datapack_to_folder", {
         options: options,
         branch: launchManifest.build.branch,
         file: { name: fileName, location: location },
@@ -363,6 +365,32 @@
   }
 
   onMount(() => {
+    filterCategories = [
+      {
+        type: lang.addons.datapacks.filters.categories.title,
+        entries: [
+          { id: "adventure", name: lang.addons.datapacks.filters.categories.adventure },
+          { id: "cursed", name: lang.addons.datapacks.filters.categories.cursed },
+          { id: "decoration", name: lang.addons.datapacks.filters.categories.decoration },
+          { id: "economy", name: lang.addons.datapacks.filters.categories.economy },
+          { id: "equipment", name: lang.addons.datapacks.filters.categories.equipment },
+          { id: "food", name: lang.addons.datapacks.filters.categories.food },
+          { id: "game-mechanics", name: lang.addons.datapacks.filters.categories.gameMechanics },
+          { id: "library", name: lang.addons.datapacks.filters.categories.library },
+          { id: "magic", name: lang.addons.datapacks.filters.categories.magic },
+          { id: "management", name: lang.addons.datapacks.filters.categories.management },
+          { id: "minigame", name: lang.addons.datapacks.filters.categories.minigame },
+          { id: "mobs", name: lang.addons.datapacks.filters.categories.mobs },
+          { id: "optimization", name: lang.addons.datapacks.filters.categories.optimization },
+          { id: "social", name: lang.addons.datapacks.filters.categories.social },
+          { id: "storage", name: lang.addons.datapacks.filters.categories.storage },
+          { id: "technology", name: lang.addons.datapacks.filters.categories.technology },
+          { id: "transportation", name: lang.addons.datapacks.filters.categories.transportation },
+          { id: "utility", name: lang.addons.datapacks.filters.categories.utility },
+          { id: "worldgen", name: lang.addons.datapacks.filters.categories.worldgen },
+        ],
+      },
+    ];
     load();
   });
 
@@ -374,23 +402,24 @@
 <div class="modrinth-wrapper">
   <div class="navbar">
     <!-- svelte-ignore a11y-click-events-have-key-events -->
-    <h1 class:primary-text={currentTabIndex === 0} on:click={() => currentTabIndex = 0}>Discover</h1>
+    <h1 class:primary-text={currentTabIndex === 0} on:click={() => currentTabIndex = 0}>{lang.addons.global.navbar.discover}</h1>
     <h2>|</h2>
     <!-- svelte-ignore a11y-click-events-have-key-events -->
-    <h1 class:primary-text={currentTabIndex === 1} on:click={() => currentTabIndex = 1}>Installed</h1>
+    <h1 class:primary-text={currentTabIndex === 1} on:click={() => currentTabIndex = 1}>{lang.addons.global.navbar.installed}</h1>
     <h2>|</h2>
     <!-- svelte-ignore a11y-click-events-have-key-events -->
-    <h1 on:click={handleSelectCustomDatapacks}>Custom</h1>
+    <h1 on:click={handleSelectCustomDatapacks}>{lang.addons.global.navbar.button.custom}</h1>
   </div>
   {#if currentTabIndex === 0}
     <ModrinthSearchBar on:search={() => {
             search_offset = 0;
+            listScroll = 0;
             searchDatapacks();
         }} bind:searchTerm={searchterm} bind:filterCategories={filterCategories} bind:filters={filters}
-                       bind:options={options} placeHolder="Search for Datapacks on Modrinth..." />
+                       bind:options={options} placeHolder={lang.addons.datapacks.searchbar.modrinth.placeholder} />
     {#if datapacks !== null && datapacks.length > 0 }
       <div id="scrollList" class="scrollList" on:scroll={() => listScroll = document.getElementById('scrollList').scrollTop ?? 0}>
-        {#each [...datapacks, datapacks.length >= 30 ? 'LOAD_MORE_DATAPACKS' : null] as item}
+        {#each [...datapacks, loadMoreButton ? 'LOAD_MORE_DATAPACKS' : null] as item}
           {#if item === 'LOAD_MORE_DATAPACKS'}
             <!-- svelte-ignore a11y-click-events-have-key-events -->
             <div class="load-more-button" on:click={loadMore}><p class="primary-text">LOAD MORE</p></div>
@@ -405,10 +434,15 @@
         {/each}
       </div>
     {:else}
-      <h1 class="loading-indicator">{datapacks == null ? 'No Datapacks found.' : 'Loading...'}</h1>
+      <h1 class="loading-indicator">{datapacks == null ? lang.addons.datapacks.noDatapacksFound : lang.addons.global.loading}</h1>
     {/if}
   {:else if currentTabIndex === 1}
-    <ModrinthSearchBar on:search={() => {}} bind:searchTerm={filterterm} placeHolder="Filter installed Datapacks..." />
+    <ModrinthSearchBar on:search={async () => {
+      const prev = launcherProfiles.addons[currentBranch].datapacks;
+      launcherProfiles.addons[currentBranch].datapacks = [];
+      await tick();
+      launcherProfiles.addons[currentBranch].datapacks = prev;
+    }} bind:searchTerm={filterterm} placeHolder={lang.addons.datapacks.searchbar.installed.placeholder} />
     {#if launcherProfiles.addons[currentBranch].datapacks.length > 0 || customDatapacks.length > 0}
       <div id="scrollList" class="scrollList" on:scroll={() => listScroll = document.getElementById('scrollList').scrollTop ?? 0}>
         {#each [...customDatapacks,...launcherProfiles.addons[currentBranch].datapacks].filter((datapack) => {
@@ -431,7 +465,7 @@
         {/each}
       </div>
       {:else}
-      <h1 class="loading-indicator">{launcherProfiles.addons[currentBranch].datapacks.length < 1 ? 'No datapacks installed.' : 'Loading...'}</h1>
+      <h1 class="loading-indicator">{launcherProfiles.addons[currentBranch].datapacks.length < 1 ? lang.addons.datapacks.noDatapacksInstalled : lang.addons.global.loading}</h1>
     {/if}
   {/if}
 </div>
