@@ -7,10 +7,9 @@ use serde::{Deserialize, Serialize};
 use serde::de::DeserializeOwned;
 use uuid::Uuid;
 use crate::{HTTP_CLIENT, LAUNCHER_DIRECTORY};
-use crate::app::gui::minecraft_auth_get_default_user;
 use super::app_data::{Announcement, ChangeLog, LauncherOptions};
+use super::gui::OnlineStatusInfo;
 use crate::custom_servers::models::CustomServer;
-use crate::error::ErrorKind;
 use crate::minecraft::minecraft_auth::NoRiskToken;
 use crate::minecraft::version::AssetObject;
 use crate::utils::get_maven_artifact_path;
@@ -30,8 +29,11 @@ pub fn get_api_base(is_experimental: bool) -> String {
 
 impl ApiEndpoints {
     /// Check API status
-    pub async fn norisk_api_status() -> Result<bool> {
-        let core = Self::request_from_norisk_endpoint("core/online", "", "").await.unwrap_or(false);
+    pub async fn norisk_api_status() -> Result<OnlineStatusInfo> {
+        let core = Self::request_from_norisk_endpoint("core/online", "", "").await.unwrap_or(OnlineStatusInfo {
+            online: false,
+            online_players: 0
+        });
         Ok(core)
     }
 
@@ -43,11 +45,6 @@ impl ApiEndpoints {
     /// Request maintenance mode
     pub async fn norisk_maintenance_mode() -> Result<bool> {
         Self::request_from_norisk_endpoint("launcher/maintenance-mode", "", "").await
-    }
-
-    /// Request all available branches
-    pub async fn norisk_branches(norisk_token: &str, request_uuid: &str) -> core::result::Result<Vec<String>, crate::error::Error> {
-        Self::request_from_norisk_endpoint_with_error_handling("launcher/branches", norisk_token, request_uuid).await
     }
 
     /// Request all available branches
@@ -77,6 +74,41 @@ impl ApiEndpoints {
     /// Request featured mods
     pub async fn norisk_featured_mods(branch: &str) -> Result<Vec<String>> {
         Self::request_from_norisk_endpoint(&*format!("launcher/featured/{}/mods", branch), "", "").await
+    }
+
+    pub async fn branches(
+        norisk_token: &str,
+        request_uuid: &str,
+    ) -> core::result::Result<Vec<String>, crate::error::Error> {
+        Self::request_from_norisk_endpoint_with_error_handling("launcher/branches", norisk_token, request_uuid)
+            .await
+    }
+
+    pub async fn assets(
+        branch: String,
+        norisk_token: &str,
+        request_uuid: &str,
+    ) -> core::result::Result<NoriskAssets, crate::error::Error> {
+        Self::request_from_norisk_endpoint_with_error_handling(
+            &format!("launcher/branch/{}", branch),
+            norisk_token,
+            request_uuid,
+        )
+            .await
+    }
+
+    /// Request launch manifest of specific build
+    pub async fn launch_manifest(
+        branch: &str,
+        norisk_token: &str,
+        uuid: Uuid,
+    ) -> core::result::Result<NoRiskLaunchManifest, crate::error::Error> {
+        Self::request_from_norisk_endpoint_with_error_handling(
+            &format!("launcher/version/launch/{}", branch),
+            norisk_token,
+            &uuid.to_string(),
+        )
+            .await
     }
 
     /// Request featured resourcepacks
@@ -187,19 +219,9 @@ impl ApiEndpoints {
         Self::post_from_await_endpoint("core/auth/await", id).await
     }
 
-    /// Request launch manifest of specific build
-    pub async fn launch_manifest(branch: &str, norisk_token: &str, uuid: Uuid) -> core::result::Result<NoRiskLaunchManifest, crate::error::Error> {
-        Self::request_from_noriskclient_endpoint(&format!("launcher/version/launch/{}", branch),norisk_token,uuid).await
-    }
-
     /// Request download of specified JRE for specific OS and architecture
     pub async fn jre(os_name: &String, os_arch: &String, jre_version: u32) -> Result<JreSource> {
         Self::request_from_norisk_endpoint(&format!("launcher/version/jre/{}/{}/{}", os_name, os_arch, jre_version), "", "").await
-    }
-
-    /// Request norisk assets json for specific branch
-    pub async fn norisk_assets(branch: String, norisk_token: &str, request_uuid: &str) -> Result<NoriskAssets> {
-        Self::request_from_norisk_endpoint(&format!("launcher/assets/{}", branch), norisk_token, request_uuid).await
     }
 
     /// Request changelogs

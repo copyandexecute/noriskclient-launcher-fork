@@ -8,7 +8,7 @@
   },
   "package": {
     "productName": "NoRiskClient",
-    "version": "0.5.13"
+    "version": "0.5.16"
   },
   "tauri": {
     "allowlist": {
@@ -23,6 +23,12 @@
           "$APPDATA/",
           "$APPDATA"
         ]
+      },
+      "shell": {
+        "all": true,
+        "execute": true,
+        "sidecar": true,
+        "open": true
       },
       "window": {
         "show": true

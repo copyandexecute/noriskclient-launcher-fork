@@ -1,6 +1,6 @@
 [package]
 name = "noriskclient"
-version = "0.5.13"
+version = "0.5.16"
 description = "A NoRiskClient launcher for Minecraft, written in Rust using Tauri."
 authors = ["NoRiskk, TimLohrer (Aim_shock)"]
 license = "GNU General Public License v3.0"
@@ -57,6 +57,7 @@ uuid = { version = "1.2", features = ["serde", "v4"] }
 chrono = { version = "0.4", features = ["serde"] }
 
 sha1 = "0.10.5"
+md5 = "0.7.0"  # Überprüfe die neueste Version
 base16ct = {version = "0.2.0", features = ["alloc"] }
 
 # UI library
